@@ -130,9 +130,13 @@ export const hono_dom_transform = createJsxTransform(create_hono_platform('dom')
  *
  * @param {AST.Program} ast
  * @param {string} filename
- * @param {{ errors?: import('@tsrx/core/types').CompileError[], comments: AST.CommentWithLocation[] }} context
+ * @param {{ source?: string, errors?: import('@tsrx/core/types').CompileError[], comments: AST.CommentWithLocation[] }} context
  */
 export function validate_hono_dom_components(ast, filename, context) {
+	// Async components are the only unsupported shape. Avoid a second full AST
+	// walk for the common case where the source cannot contain an async function.
+	if (context.source && !context.source.includes('async')) return;
+
 	const component = find_async_hono_dom_component(ast);
 	if (!component) return;
 
@@ -203,9 +207,7 @@ function collect_hono_dom_components(node, parent, functions, component_referenc
 	}
 
 	if (node.type === 'JSXElement') {
-		for (const name of get_jsx_component_references(node.openingElement?.name)) {
-			component_references.add(name);
-		}
+		add_jsx_component_references(node.openingElement?.name, component_references);
 	}
 
 	if (node.type === 'CallExpression') {
@@ -276,22 +278,21 @@ function get_static_name(node, allow_literal = false) {
 
 /**
  * @param {AST.Node | null | undefined} node
- * @returns {string[]}
+ * @param {Set<string>} component_references
  */
-function get_jsx_component_references(node) {
-	if (!node) return [];
+function add_jsx_component_references(node, component_references) {
+	if (!node) return;
 	if (node.type === 'JSXIdentifier') {
-		return is_uppercase_name(node.name) ? [node.name] : [];
+		if (is_uppercase_name(node.name)) component_references.add(node.name);
+		return;
 	}
 	if (node.type === 'JSXMemberExpression') {
-		return [
-			...get_jsx_component_references(node.object),
-			...(node.property?.type === 'JSXIdentifier' && is_uppercase_name(node.property.name)
-				? [node.property.name]
-				: []),
-		];
+		add_jsx_component_references(node.object, component_references);
+		if (node.property?.type === 'JSXIdentifier' && is_uppercase_name(node.property.name)) {
+			component_references.add(node.property.name);
+		}
+		return;
 	}
-	return [];
 }
 
 /**
@@ -308,7 +309,7 @@ function get_jsx_factory_component_reference(node) {
 				  callee.property.type === 'Identifier'
 				? callee.property.name
 				: null;
-	if (!callee_name || !['jsx', 'jsxs', 'jsxDEV'].includes(callee_name)) return null;
+	if (callee_name !== 'jsx' && callee_name !== 'jsxs' && callee_name !== 'jsxDEV') return null;
 
 	const first_argument = node.arguments[0];
 	if (first_argument?.type === 'Identifier') return first_argument.name;

@@ -1,5 +1,6 @@
 ---
 '@tsrx/hono': patch
+'@tsrx/vite-plugin-hono': patch
 ---
 
-Reduce temporary allocations while validating Hono DOM component candidates.
+Avoid redundant DOM validation work and Vite HMR recompilation when no virtual CSS module is loaded.

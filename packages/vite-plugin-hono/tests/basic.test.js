@@ -120,6 +120,27 @@ describe('@tsrx/vite-plugin-hono', () => {
 		expect(modules).toContain(css_module);
 	});
 
+	it('does not read or compile a file without a loaded virtual CSS module', async () => {
+		const plugin = tsrxHono();
+		const modules = [{ id: '/virtual/App.tsrx' }];
+		const result = await plugin.handleHotUpdate({
+			file: '/virtual/App.tsrx',
+			modules,
+			read: async () => {
+				throw new Error('source should not be read');
+			},
+			server: {
+				moduleGraph: {
+					getModuleById() {
+						return undefined;
+					},
+				},
+			},
+		});
+
+		expect(result).toBe(modules);
+	});
+
 	it('registers Hono JSX runtime dependencies for optimizeDeps', () => {
 		const config = tsrxHono({ mode: 'dom' }).config();
 		expect(config.optimizeDeps.extensions).toContain('.tsrx');

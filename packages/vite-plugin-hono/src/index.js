@@ -108,10 +108,11 @@ export function tsrxHono(options = {}) {
 
 		async handleHotUpdate(ctx) {
 			if (!TSRX_EXTENSION_PATTERN.test(ctx.file)) return;
-			update_css_cache(await ctx.read(), ctx.file);
-
 			const css_module = ctx.server.moduleGraph.getModuleById('\0' + ctx.file + CSS_QUERY);
 			if (!css_module) return ctx.modules;
+
+			update_css_cache(await ctx.read(), ctx.file);
+
 			ctx.server.moduleGraph.invalidateModule(css_module);
 			return [...ctx.modules, css_module];
 		},

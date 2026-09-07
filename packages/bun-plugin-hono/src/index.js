@@ -11,6 +11,8 @@ const CSS_QUERY_PATTERN = /\?tsrx-css&lang\.css$/;
 
 /**
  * @typedef {'server' | 'dom'} TsrxHonoMode
+ * Hono-specific adapters remain under `@tsrx/hono/*` in direct mode.
+ *
  * @typedef {{
  *   mode?: TsrxHonoMode,
  *   include?: RegExp,

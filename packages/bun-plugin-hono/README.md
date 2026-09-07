@@ -34,3 +34,13 @@ Bun.plugin(tsrxHono());
 ```
 
 Options are `mode`, `runtimeImports`, `emitCss`, `include`, and `exclude`.
+
+`runtimeImports: 'direct'` is a limited helper-import mode for Hono: shared
+helpers use `@tsrx/core/runtime/*`, while Hono-specific adapters still use
+`@tsrx/hono/*` because Hono has no separate standalone runtime package. If the
+compiled modules are published or built with direct imports, declare both packages
+directly:
+
+```bash
+pnpm add @tsrx/core @tsrx/hono hono
+```

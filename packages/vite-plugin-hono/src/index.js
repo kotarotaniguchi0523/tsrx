@@ -13,6 +13,8 @@ const CSS_QUERY = '?tsrx-css&lang.css';
 /**
  * @typedef {'server' | 'dom'} TsrxHonoMode
  * @typedef {{ code: string, map: unknown }} TsrxHonoTransformResult
+ * Hono-specific adapters remain under `@tsrx/hono/*` in direct mode.
+ *
  * @typedef {{
  *   mode?: TsrxHonoMode,
  *   runtimeImports?: RuntimeImportMode,

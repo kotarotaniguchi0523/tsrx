@@ -64,12 +64,19 @@ describe('@tsrx/vite-plugin-hono', () => {
 	it('selects the Hono DOM runtime and forwards direct runtime imports', async () => {
 		const plugin = tsrxHono({ mode: 'dom', runtimeImports: 'direct' });
 		const transformed = await plugin.transform(
-			`export function App(props) @{ <input {...props} /> }`,
+			`export function App(props) @{
+				@try {
+					<input {...props} />
+				} @catch (error) {
+					<p>{error.message}</p>
+				}
+			}`,
 			'/virtual/App.tsrx',
 		);
 
 		expect(transformed.code).toContain('hono/jsx/dom/jsx-runtime');
 		expect(transformed.code).toContain('@tsrx/core/runtime/ref');
+		expect(transformed.code).toContain('@tsrx/hono/dom/error-boundary');
 	});
 
 	it('emits and refreshes virtual CSS', async () => {

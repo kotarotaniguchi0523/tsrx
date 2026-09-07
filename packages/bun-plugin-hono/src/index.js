@@ -78,6 +78,16 @@ export function tsrxHono(options = {}) {
 	/** @type {Map<string, string>} */
 	const css_cache = new Map();
 
+	/** @param {string} code @param {string} id @param {string | undefined} css @param {boolean} emit_css */
+	function append_css_import(code, id, css, emit_css) {
+		if (!emit_css || !css) {
+			css_cache.delete(id);
+			return code;
+		}
+		css_cache.set(id, css);
+		return `${code}\nimport ${JSON.stringify(id)};\n`;
+	}
+
 	return {
 		name: '@tsrx/bun-plugin-hono',
 
@@ -100,14 +110,7 @@ export function tsrxHono(options = {}) {
 					const source = await readFile(args.path, 'utf-8');
 					const { code, css } = compile(source, args.path, compile_options);
 					const css_id = args.path + CSS_QUERY;
-					let output = code;
-
-					if (emit_css && css) {
-						css_cache.set(css_id, css);
-						output = `${code}\nimport ${JSON.stringify(css_id)};\n`;
-					} else {
-						css_cache.delete(css_id);
-					}
+					const output = append_css_import(code, css_id, css, emit_css);
 
 					if (transpiler) {
 						return { contents: transpiler.transformSync(output), loader: 'js' };

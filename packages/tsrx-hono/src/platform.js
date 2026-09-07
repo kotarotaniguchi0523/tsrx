@@ -18,17 +18,46 @@ const HonoDomSource = 'hono/jsx/dom';
  * @returns {JsxPlatform}
  */
 function create_hono_platform(mode) {
-	const dom = mode === 'dom';
-	const jsx_source = dom ? HonoDomSource : HonoServerSource;
+	const is_dom = mode === 'dom';
+	const jsx_source = is_dom ? HonoDomSource : HonoServerSource;
+	/** @type {NonNullable<JsxPlatform['hooks']>} */
+	const hooks = {
+		createErrorBoundary(try_content, _raw_try_content, fallback_fn, ctx, node) {
+			return create_hono_error_boundary(try_content, fallback_fn, ctx, node);
+		},
+		...(is_dom
+			? {
+					// Hono DOM keys hook state by the runtime component function. A
+					// helper recreated inside its parent would lose state on updates.
+					moduleScopedHookComponents: true,
+					// Hono DOM JSX nodes carry mutable reconciliation state (`e`,
+					// `vC`, and hook stash) on the node object itself. Reusing any
+					// module-scoped node across mounts is therefore unsafe, not only
+					// reusing composite nodes.
+					canHoistStaticNode() {
+						return false;
+					},
+					validateComponentAwait(await_node, _component, ctx) {
+						error(
+							'Hono JSX DOM does not support top-level `await` in components. Use `use(promise)` with `<Suspense>` instead.',
+							ctx.filename,
+							await_node,
+							ctx.errors,
+							ctx.comments,
+						);
+					},
+				}
+			: {}),
+	};
 
 	return {
-		name: dom ? 'Hono JSX DOM' : 'Hono JSX',
+		name: is_dom ? 'Hono JSX DOM' : 'Hono JSX',
 		imports: {
 			fragment: jsx_source,
 			suspense: jsx_source,
 			dynamic: '@tsrx/hono/dynamic',
 			dynamicFactory: {},
-			errorBoundary: dom ? '@tsrx/hono/dom/error-boundary' : '@tsrx/hono/error-boundary',
+			errorBoundary: is_dom ? '@tsrx/hono/dom/error-boundary' : '@tsrx/hono/error-boundary',
 			mergeRefs: '@tsrx/hono/ref',
 			refProp: '@tsrx/hono/ref',
 			forOfIterableHelper: '@tsrx/hono/runtime/iterable',
@@ -48,42 +77,9 @@ function create_hono_platform(mode) {
 		validation: {
 			// Server JSX supports async function components. The DOM renderer is
 			// synchronous; use Hono's `use(promise)` + Suspense there instead.
-			requireUseServerForAwait: dom,
+			requireUseServerForAwait: is_dom,
 		},
-		...(dom
-			? {
-					hooks: {
-						// Hono DOM keys hook state by the runtime component function. A
-						// helper recreated inside its parent would lose state on updates.
-						moduleScopedHookComponents: true,
-						// Hono DOM JSX nodes carry mutable reconciliation state (`e`,
-						// `vC`, and hook stash) on the node object itself. Reusing any
-						// module-scoped node across mounts is therefore unsafe, not only
-						// reusing composite nodes.
-						canHoistStaticNode() {
-							return false;
-						},
-						validateComponentAwait(await_node, _component, ctx) {
-							error(
-								'Hono JSX DOM does not support top-level `await` in components. Use `use(promise)` with `<Suspense>` instead.',
-								ctx.filename,
-								await_node,
-								ctx.errors,
-								ctx.comments,
-							);
-						},
-						createErrorBoundary(try_content, _raw_try_content, fallback_fn, ctx, node) {
-							return create_hono_error_boundary(try_content, fallback_fn, ctx, node);
-						},
-					},
-				}
-			: {
-					hooks: {
-						createErrorBoundary(try_content, _raw_try_content, fallback_fn, ctx, node) {
-							return create_hono_error_boundary(try_content, fallback_fn, ctx, node);
-						},
-					},
-				}),
+		hooks,
 	};
 }
 
@@ -166,19 +162,17 @@ function find_async_hono_dom_component(ast) {
 
 	collect_hono_dom_components(ast, null, [], functions, component_references);
 
-	for (const candidate of functions) {
-		if (!candidate.node.async) continue;
-		if (
-			candidate.defaultExport ||
-			(candidate.name && is_uppercase_name(candidate.name)) ||
-			(candidate.name && component_references.has(candidate.name))
-		) {
-			return candidate.node;
-		}
-	}
-
-	return null;
+	const component = functions.find(
+		({ node, name, defaultExport }) =>
+			node.async &&
+			(defaultExport ||
+				(name && is_uppercase_name(name)) ||
+				(name && component_references.has(name))),
+	);
+	return component?.node ?? null;
 }
+
+const AST_METADATA_KEYS = new Set(['loc', 'start', 'end', 'metadata']);
 
 /**
  * @param {AST.Node | AST.Node[] | null | undefined} node
@@ -218,20 +212,11 @@ function collect_hono_dom_components(node, parent, ancestors, functions, compone
 
 	const next_ancestors = [...ancestors, node];
 	for (const [key, value] of Object.entries(node)) {
-		if (key === 'loc' || key === 'start' || key === 'end' || key === 'metadata') continue;
-		if (Array.isArray(value)) {
-			for (const child of value) {
-				collect_hono_dom_components(
-					/** @type {AST.Node | null} */ (child),
-					node,
-					next_ancestors,
-					functions,
-					component_references,
-				);
-			}
-		} else {
+		if (AST_METADATA_KEYS.has(key)) continue;
+		const children = Array.isArray(value) ? value : [value];
+		for (const child of children) {
 			collect_hono_dom_components(
-				/** @type {AST.Node | null} */ (value),
+				/** @type {AST.Node | null} */ (child),
 				node,
 				next_ancestors,
 				functions,
@@ -252,35 +237,30 @@ function get_function_binding_name(node, parent) {
 	}
 
 	if (parent?.type === 'VariableDeclarator' && parent.init === node) {
-		return get_static_binding_name(parent.id);
+		return get_static_name(parent.id);
 	}
 	if (parent?.type === 'AssignmentExpression' && parent.right === node) {
-		return get_static_binding_name(parent.left);
+		return get_static_name(parent.left);
 	}
 	if (parent?.type === 'Property' && parent.value === node) {
-		return get_static_property_name(parent.key);
+		return get_static_name(parent.key, true);
 	}
 	if (parent?.type === 'MethodDefinition' && parent.value === node) {
-		return get_static_property_name(parent.key);
+		return get_static_name(parent.key, true);
 	}
 	return null;
 }
 
 /**
  * @param {AST.Node | null | undefined} node
+ * @param {boolean} [allow_literal]
  * @returns {string | null}
  */
-function get_static_binding_name(node) {
-	return node?.type === 'Identifier' ? node.name : null;
-}
-
-/**
- * @param {AST.Node | null | undefined} node
- * @returns {string | null}
- */
-function get_static_property_name(node) {
+function get_static_name(node, allow_literal = false) {
 	if (node?.type === 'Identifier') return node.name;
-	if (node?.type === 'Literal' && typeof node.value === 'string') return node.value;
+	if (allow_literal && node?.type === 'Literal' && typeof node.value === 'string') {
+		return node.value;
+	}
 	return null;
 }
 

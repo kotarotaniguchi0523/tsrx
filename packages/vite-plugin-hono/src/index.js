@@ -38,10 +38,21 @@ export function tsrxHono(options = {}) {
 	/** @type {Map<string, string>} */
 	const css_cache = new Map();
 
-	function update_css_cache(/** @type {string} */ source, /** @type {string} */ id) {
-		const { css } = compile(source, id, compile_options);
+	/** @param {string} id @param {string | undefined} css */
+	function cache_css(id, css) {
 		if (css) css_cache.set(id, css);
 		else css_cache.delete(id);
+	}
+
+	function update_css_cache(/** @type {string} */ source, /** @type {string} */ id) {
+		const { css } = compile(source, id, compile_options);
+		cache_css(id, css);
+	}
+
+	/** @param {string} code @param {string} id @param {string | undefined} css */
+	function append_css_import(code, id, css) {
+		cache_css(id, css);
+		return css ? `${code}\nimport ${JSON.stringify(id + CSS_QUERY)};\n` : code;
 	}
 
 	return /** @type {Plugin} */ ({
@@ -75,13 +86,7 @@ export function tsrxHono(options = {}) {
 			if (!TSRX_EXTENSION_PATTERN.test(id)) return null;
 
 			const result = compile(code, id, compile_options);
-			let source = result.code;
-			if (result.css) {
-				css_cache.set(id, result.css);
-				source = `${source}\nimport ${JSON.stringify(id + CSS_QUERY)};\n`;
-			} else {
-				css_cache.delete(id);
-			}
+			const source = append_css_import(result.code, id, result.css);
 
 			const transformed = await transformWithOxc(
 				source,

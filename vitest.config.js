@@ -113,6 +113,15 @@ export default defineConfig({
 		projects: [
 			{
 				test: {
+					name: 'tsrx-hono',
+					include: ['packages/tsrx-hono/tests/**/*.test.js'],
+					environment: 'node',
+					globals: true,
+				},
+				plugins: [],
+			},
+			{
+				test: {
 					name: 'tsrx-react',
 					include: ['packages/tsrx-react/tests/**/*.test.js'],
 					environment: 'node',
@@ -165,6 +174,15 @@ export default defineConfig({
 				test: {
 					name: 'bun-plugin-react',
 					include: ['packages/bun-plugin-react/tests/**/*.test.js'],
+					environment: 'node',
+					globals: true,
+				},
+				plugins: [],
+			},
+			{
+				test: {
+					name: 'bun-plugin-hono',
+					include: ['packages/bun-plugin-hono/tests/**/*.test.js'],
 					environment: 'node',
 					globals: true,
 				},
@@ -239,6 +257,15 @@ export default defineConfig({
 				test: {
 					name: 'vite-plugin-react',
 					include: ['packages/vite-plugin-react/tests/**/*.test.js'],
+					environment: 'node',
+					globals: true,
+				},
+				plugins: [],
+			},
+			{
+				test: {
+					name: 'vite-plugin-hono',
+					include: ['packages/vite-plugin-hono/tests/**/*.test.js'],
 					environment: 'node',
 					globals: true,
 				},

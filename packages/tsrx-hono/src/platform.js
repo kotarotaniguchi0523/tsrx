@@ -160,7 +160,7 @@ function find_async_hono_dom_component(ast) {
 	const functions = [];
 	const component_references = new Set();
 
-	collect_hono_dom_components(ast, null, [], functions, component_references);
+	collect_hono_dom_components(ast, null, functions, component_references);
 
 	const component = functions.find(
 		({ node, name, defaultExport }) =>
@@ -177,15 +177,14 @@ const AST_METADATA_KEYS = new Set(['loc', 'start', 'end', 'metadata']);
 /**
  * @param {AST.Node | AST.Node[] | null | undefined} node
  * @param {AST.Node | null} parent
- * @param {AST.Node[]} ancestors
  * @param {Array<{ node: AST.Function, name: string | null, defaultExport: boolean }>} functions
  * @param {Set<string>} component_references
  */
-function collect_hono_dom_components(node, parent, ancestors, functions, component_references) {
+function collect_hono_dom_components(node, parent, functions, component_references) {
 	if (!node) return;
 	if (Array.isArray(node)) {
 		for (const child of node) {
-			collect_hono_dom_components(child, parent, ancestors, functions, component_references);
+			collect_hono_dom_components(child, parent, functions, component_references);
 		}
 		return;
 	}
@@ -210,7 +209,6 @@ function collect_hono_dom_components(node, parent, ancestors, functions, compone
 		if (name) component_references.add(name);
 	}
 
-	const next_ancestors = [...ancestors, node];
 	for (const [key, value] of Object.entries(node)) {
 		if (AST_METADATA_KEYS.has(key)) continue;
 		const children = Array.isArray(value) ? value : [value];
@@ -218,7 +216,6 @@ function collect_hono_dom_components(node, parent, ancestors, functions, compone
 			collect_hono_dom_components(
 				/** @type {AST.Node | null} */ (child),
 				node,
-				next_ancestors,
 				functions,
 				component_references,
 			);

@@ -123,3 +123,113 @@ function create_hono_error_boundary(try_content, fallback_fn, ctx, node) {
 
 export const hono_server_transform = createJsxTransform(create_hono_platform('server'));
 export const hono_dom_transform = createJsxTransform(create_hono_platform('dom'));
+
+/**
+ * Hono DOM renders components synchronously. Its renderer does not unwrap a
+ * Promise returned by an async component, even when the component itself does
+ * not contain an `await`; async work must be represented with `use(promise)`
+ * inside `<Suspense>` instead.
+ *
+ * @param {AST.Program} ast
+ * @param {string} filename
+ * @param {{ errors?: import('@tsrx/core/types').CompileError[], comments: AST.CommentWithLocation[] }} context
+ */
+export function validate_hono_dom_components(ast, filename, context) {
+	const component = find_async_jsx_function(ast);
+	if (!component) return;
+
+	error(
+		'Hono JSX DOM does not support async components. Use use(promise) with <Suspense> instead.',
+		filename,
+		component,
+		context.errors,
+		context.comments,
+	);
+}
+
+/**
+ * Find the first async function whose own body produces JSX. JSX nested in a
+ * call such as `render(<App />)` is a consumer expression, not an async
+ * component, and must not be rejected.
+ *
+ * @param {AST.Node | AST.Node[] | null | undefined} node
+ * @returns {AST.Function | null}
+ */
+function find_async_jsx_function(node) {
+	if (!node) return null;
+	if (Array.isArray(node)) {
+		for (const child of node) {
+			const found = find_async_jsx_function(child);
+			if (found) return found;
+		}
+		return null;
+	}
+	if (typeof node !== 'object') return null;
+
+	if (is_function_node(node)) {
+		if (node.async && function_body_contains_rendered_jsx(node.body)) {
+			return node;
+		}
+		return find_async_jsx_function(node.body);
+	}
+
+	for (const [key, value] of Object.entries(node)) {
+		if (key === 'loc' || key === 'start' || key === 'end' || key === 'metadata') continue;
+		const found = find_async_jsx_function(/** @type {AST.Node | AST.Node[] | null} */ (value));
+		if (found) return found;
+	}
+	return null;
+}
+
+/**
+ * @param {AST.Node | AST.Node[] | null | undefined} node
+ * @returns {boolean}
+ */
+function function_body_contains_rendered_jsx(node) {
+	if (!node) return false;
+	if (Array.isArray(node)) return node.some(function_body_contains_rendered_jsx);
+	if (typeof node !== 'object') return false;
+	if (is_function_node(node)) return false;
+	if (node.type === 'JSXCodeBlock' || node.type?.startsWith('JSX')) return true;
+	if (node.type === 'CallExpression' || node.type === 'NewExpression') return false;
+	if (node.type === 'ReturnStatement') return expression_contains_jsx(node.argument);
+
+	for (const [key, value] of Object.entries(node)) {
+		if (key === 'loc' || key === 'start' || key === 'end' || key === 'metadata') continue;
+		if (function_body_contains_rendered_jsx(/** @type {AST.Node | AST.Node[] | null} */ (value)))
+			return true;
+	}
+	return false;
+}
+
+/**
+ * @param {AST.Node | null | undefined} node
+ * @returns {boolean}
+ */
+function expression_contains_jsx(node) {
+	if (!node || typeof node !== 'object') return false;
+	if (node.type?.startsWith('JSX')) return true;
+	if (node.type === 'CallExpression' || node.type === 'NewExpression') return false;
+
+	for (const [key, value] of Object.entries(node)) {
+		if (key === 'loc' || key === 'start' || key === 'end' || key === 'metadata') continue;
+		if (Array.isArray(value)) {
+			if (value.some((child) => expression_contains_jsx(child))) return true;
+		} else if (expression_contains_jsx(/** @type {AST.Node | null} */ (value))) {
+			return true;
+		}
+	}
+	return false;
+}
+
+/**
+ * @param {AST.Node} node
+ * @returns {node is AST.Function}
+ */
+function is_function_node(node) {
+	return (
+		node.type === 'FunctionDeclaration' ||
+		node.type === 'FunctionExpression' ||
+		node.type === 'ArrowFunctionExpression'
+	);
+}

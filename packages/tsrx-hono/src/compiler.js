@@ -8,7 +8,7 @@ import { analyzeTsrx, createVolarMappingsResult, dedupeMappings, parseModule } f
  * Create the public compiler facade shared by the Hono server and DOM targets.
  *
  * @param {(ast: AST.Program, source: string, filename?: string, options?: JsxTransformOptions) => JsxTransformResult} transform
- * @param {{ typeOnlyModuleScopedHookComponents?: boolean }} [settings]
+ * @param {{ typeOnlyModuleScopedHookComponents?: boolean, validate?: (ast: AST.Program, filename: NonEmptyString<string>, context: { errors?: CompileError[], comments: AST.CommentWithLocation[], collect: boolean }) => void }} [settings]
  */
 export function createCompiler(transform, settings = {}) {
 	/**
@@ -41,6 +41,11 @@ export function createCompiler(transform, settings = {}) {
 			filename,
 			collect ? { collect: true, loose: !!options?.loose, errors, comments } : undefined,
 		);
+		settings.validate?.(ast, filename, {
+			errors: collect ? errors : undefined,
+			comments,
+			collect,
+		});
 		const { ast: _ast, ...result } = transform(
 			ast,
 			source,
@@ -75,6 +80,7 @@ export function createCompiler(transform, settings = {}) {
 			errors,
 			comments,
 		});
+		settings.validate?.(ast, filename, { errors, comments, collect: true });
 		const transformed = transform(ast, source, filename, {
 			...options,
 			collect: true,

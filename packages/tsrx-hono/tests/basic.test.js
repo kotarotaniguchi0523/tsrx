@@ -1,6 +1,61 @@
 import { describe, expect, it } from 'vitest';
+import {
+	runSharedClassFunctionComponentTests,
+	runSharedCodeBlockChildrenTests,
+	runSharedCompileDiagnosticsTests,
+	runSharedCompileTests,
+	runSharedComponentParamsTests,
+	runSharedSwitchHelperHoistingTests,
+	runSharedTsxExpressionTsrxTests,
+} from '@tsrx/core/test-harness/compile';
+import { runSharedSourceMappingTests } from '@tsrx/core/test-harness/source-mappings';
 import { compile as compileServer } from '../src/index.js';
+import { compile_to_volar_mappings as compileServerToVolarMappings } from '../src/index.js';
 import { compile as compileDom } from '../src/dom.js';
+import { compile_to_volar_mappings as compileDomToVolarMappings } from '../src/dom.js';
+
+runSharedSourceMappingTests({
+	compile: compileServer,
+	compile_to_volar_mappings: compileServerToVolarMappings,
+	name: 'hono',
+	rejectsComponentAwait: false,
+});
+runSharedTsxExpressionTsrxTests({ compile: compileServer, name: 'hono', classAttrName: 'class' });
+runSharedCompileTests({ compile: compileServer, name: 'hono', classAttrName: 'class' });
+runSharedCompileDiagnosticsTests({
+	compile_to_volar_mappings: compileServerToVolarMappings,
+	name: 'hono',
+});
+runSharedCodeBlockChildrenTests({ compile: compileServer, name: 'hono' });
+
+runSharedSourceMappingTests({
+	compile: compileDom,
+	compile_to_volar_mappings: compileDomToVolarMappings,
+	name: 'hono-dom',
+	rejectsComponentAwait: true,
+});
+runSharedTsxExpressionTsrxTests({ compile: compileDom, name: 'hono-dom', classAttrName: 'class' });
+runSharedCompileDiagnosticsTests({
+	compile_to_volar_mappings: compileDomToVolarMappings,
+	name: 'hono-dom',
+});
+runSharedCodeBlockChildrenTests({ compile: compileDom, name: 'hono-dom' });
+runSharedClassFunctionComponentTests({
+	compile: compileDom,
+	compile_to_volar_mappings: compileDomToVolarMappings,
+	name: 'hono-dom',
+});
+runSharedComponentParamsTests({
+	compile: compileDom,
+	compile_to_volar_mappings: compileDomToVolarMappings,
+	name: 'hono-dom',
+});
+runSharedSwitchHelperHoistingTests({
+	compile: compileDom,
+	compile_to_volar_mappings: compileDomToVolarMappings,
+	name: 'hono-dom',
+	clientHelperShape: 'module-function',
+});
 
 describe('@tsrx/hono server compiler', () => {
 	it('emits Hono server JSX helpers and preserves async components', () => {
@@ -115,7 +170,7 @@ describe('@tsrx/hono DOM compiler', () => {
 		expect(code).toContain('__mergeRefs');
 	});
 
-	it('rejects top-level await and points users to use plus Suspense', () => {
+	it('rejects async DOM components and points users to use plus Suspense', () => {
 		expect(() =>
 			compileDom(
 				`export async function App() @{
@@ -124,7 +179,18 @@ describe('@tsrx/hono DOM compiler', () => {
 				}`,
 				'App.tsrx',
 			),
-		).toThrow(/Hono JSX DOM does not support top-level `await`/);
+		).toThrow(/Hono JSX DOM does not support async components/);
+	});
+
+	it('rejects async DOM components even without an await expression', () => {
+		expect(() =>
+			compileDom(
+				`export async function App() {
+					return <div />;
+				}`,
+				'App.tsrx',
+			),
+		).toThrow(/Hono JSX DOM does not support async components/);
 	});
 
 	it('uses the DOM ErrorBoundary adapter', () => {

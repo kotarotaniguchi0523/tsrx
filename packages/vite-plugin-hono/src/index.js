@@ -1,0 +1,129 @@
+/** @import { Plugin } from 'vite' */
+/** @import { DepScanTransformPlugin } from '@tsrx/core/types/vite/dep-scan' */
+/** @import { RuntimeImportMode } from '@tsrx/hono' */
+
+import { transformWithOxc } from 'vite';
+import { compile as compileServer } from '@tsrx/hono';
+import { compile as compileDom } from '@tsrx/hono/dom';
+import { createDepScanTransformPlugin } from '@tsrx/core/vite/dep-scan';
+
+const TSRX_EXTENSION_PATTERN = /\.tsrx$/;
+const CSS_QUERY = '?tsrx-css&lang.css';
+
+/**
+ * @typedef {'server' | 'dom'} TsrxHonoMode
+ * @typedef {{ code: string, map: unknown }} TsrxHonoTransformResult
+ * @typedef {{
+ *   mode?: TsrxHonoMode,
+ *   runtimeImports?: RuntimeImportMode,
+ * }} TsrxHonoPluginOptions
+ */
+
+/**
+ * Compile `.tsrx` to Hono-flavoured TSX and finish the automatic JSX runtime
+ * transform in Vite. The explicit mode keeps compiler-injected Hono helpers
+ * aligned with the chosen `hono/jsx` or `hono/jsx/dom` runtime.
+ *
+ * @param {TsrxHonoPluginOptions} [options]
+ * @returns {Plugin}
+ */
+export function tsrxHono(options = {}) {
+	const mode = options.mode ?? 'server';
+	const jsx_import_source = mode === 'dom' ? 'hono/jsx/dom' : 'hono/jsx';
+	const compile = mode === 'dom' ? compileDom : compileServer;
+	const compile_options = { runtimeImports: options.runtimeImports };
+
+	/** @type {Map<string, string>} */
+	const css_cache = new Map();
+
+	function update_css_cache(/** @type {string} */ source, /** @type {string} */ id) {
+		const { css } = compile(source, id, compile_options);
+		if (css) css_cache.set(id, css);
+		else css_cache.delete(id);
+	}
+
+	return /** @type {Plugin} */ ({
+		name: '@tsrx/vite-plugin-hono',
+		enforce: 'pre',
+
+		config() {
+			return {
+				optimizeDeps: {
+					extensions: ['.tsrx'],
+					rolldownOptions: {
+						transform: { jsx: { importSource: jsx_import_source } },
+						plugins: [create_dep_scan_plugin(jsx_import_source, compile_options, compile)],
+					},
+				},
+			};
+		},
+
+		resolveId(source) {
+			if (!source.includes(CSS_QUERY)) return null;
+			if (source.startsWith('\0')) return source;
+			return '\0' + source;
+		},
+
+		load(id) {
+			if (!id.startsWith('\0') || !id.includes(CSS_QUERY)) return null;
+			return css_cache.get(id.slice(1).split('?')[0]) ?? '';
+		},
+
+		async transform(code, id) {
+			if (!TSRX_EXTENSION_PATTERN.test(id)) return null;
+
+			const result = compile(code, id, compile_options);
+			let source = result.code;
+			if (result.css) {
+				css_cache.set(id, result.css);
+				source = `${source}\nimport ${JSON.stringify(id + CSS_QUERY)};\n`;
+			} else {
+				css_cache.delete(id);
+			}
+
+			const transformed = await transformWithOxc(
+				source,
+				id,
+				{
+					lang: 'tsx',
+					sourcemap: true,
+					jsx: {
+						runtime: 'automatic',
+						importSource: jsx_import_source,
+					},
+					target: 'esnext',
+				},
+				result.map,
+			);
+
+			return { code: transformed.code, map: transformed.map };
+		},
+
+		async handleHotUpdate(ctx) {
+			if (!TSRX_EXTENSION_PATTERN.test(ctx.file)) return;
+			update_css_cache(await ctx.read(), ctx.file);
+
+			const css_module = ctx.server.moduleGraph.getModuleById('\0' + ctx.file + CSS_QUERY);
+			if (!css_module) return ctx.modules;
+			ctx.server.moduleGraph.invalidateModule(css_module);
+			return [...ctx.modules, css_module];
+		},
+	});
+}
+
+/**
+ * @param {string} jsx_import_source
+ * @param {{ runtimeImports?: RuntimeImportMode }} compile_options
+ * @param {(code: string, id: string, options?: object) => { code: string }} compile
+ * @returns {DepScanTransformPlugin}
+ */
+function create_dep_scan_plugin(jsx_import_source, compile_options, compile) {
+	return createDepScanTransformPlugin({
+		name: '@tsrx/vite-plugin-hono:dep-scan',
+		filter: TSRX_EXTENSION_PATTERN,
+		compile: (code, id) => compile(code, id, compile_options),
+		imports: [jsx_import_source + '/jsx-runtime'],
+	});
+}
+
+export default tsrxHono;

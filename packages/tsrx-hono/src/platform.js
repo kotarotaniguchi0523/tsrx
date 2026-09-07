@@ -34,6 +34,8 @@ function create_hono_platform(mode) {
 			forOfIterableHelper: '@tsrx/hono/runtime/iterable',
 		},
 		directRuntimeImports: {
+			// Hono-specific adapters intentionally remain on @tsrx/hono/* because
+			// this target does not publish a separate standalone runtime package.
 			mergeRefs: '@tsrx/core/runtime/ref',
 			refProp: '@tsrx/core/runtime/ref',
 			forOfIterableHelper: '@tsrx/core/runtime/iterable',
@@ -135,7 +137,7 @@ export const hono_dom_transform = createJsxTransform(create_hono_platform('dom')
  * @param {{ errors?: import('@tsrx/core/types').CompileError[], comments: AST.CommentWithLocation[] }} context
  */
 export function validate_hono_dom_components(ast, filename, context) {
-	const component = find_async_jsx_function(ast);
+	const component = find_async_hono_dom_component(ast);
 	if (!component) return;
 
 	error(
@@ -148,78 +150,194 @@ export function validate_hono_dom_components(ast, filename, context) {
 }
 
 /**
- * Find the first async function whose own body produces JSX. JSX nested in a
- * call such as `render(<App />)` is a consumer expression, not an async
- * component, and must not be rejected.
+ * Find the first async function that can be used as a Hono DOM component.
+ * Looking for JSX anywhere below an async function is not sufficient: event
+ * handlers and other helpers may legitimately create JSX without returning it
+ * to Hono's renderer. Component positions and the conventional uppercase JSX
+ * binding names provide the boundary that the source AST can establish.
  *
- * @param {AST.Node | AST.Node[] | null | undefined} node
+ * @param {AST.Program} ast
  * @returns {AST.Function | null}
  */
-function find_async_jsx_function(node) {
-	if (!node) return null;
-	if (Array.isArray(node)) {
-		for (const child of node) {
-			const found = find_async_jsx_function(child);
-			if (found) return found;
-		}
-		return null;
-	}
-	if (typeof node !== 'object') return null;
+function find_async_hono_dom_component(ast) {
+	/** @type {Array<{ node: AST.Function, name: string | null, defaultExport: boolean }>} */
+	const functions = [];
+	const component_references = new Set();
 
-	if (is_function_node(node)) {
-		if (node.async && function_body_contains_rendered_jsx(node.body)) {
-			return node;
+	collect_hono_dom_components(ast, null, [], functions, component_references);
+
+	for (const candidate of functions) {
+		if (!candidate.node.async) continue;
+		if (
+			candidate.defaultExport ||
+			(candidate.name && is_uppercase_name(candidate.name)) ||
+			(candidate.name && component_references.has(candidate.name))
+		) {
+			return candidate.node;
 		}
-		return find_async_jsx_function(node.body);
 	}
 
-	for (const [key, value] of Object.entries(node)) {
-		if (key === 'loc' || key === 'start' || key === 'end' || key === 'metadata') continue;
-		const found = find_async_jsx_function(/** @type {AST.Node | AST.Node[] | null} */ (value));
-		if (found) return found;
-	}
 	return null;
 }
 
 /**
  * @param {AST.Node | AST.Node[] | null | undefined} node
- * @returns {boolean}
+ * @param {AST.Node | null} parent
+ * @param {AST.Node[]} ancestors
+ * @param {Array<{ node: AST.Function, name: string | null, defaultExport: boolean }>} functions
+ * @param {Set<string>} component_references
  */
-function function_body_contains_rendered_jsx(node) {
-	if (!node) return false;
-	if (Array.isArray(node)) return node.some(function_body_contains_rendered_jsx);
-	if (typeof node !== 'object') return false;
-	if (is_function_node(node)) return false;
-	if (node.type === 'JSXCodeBlock' || node.type?.startsWith('JSX')) return true;
-	if (node.type === 'CallExpression' || node.type === 'NewExpression') return false;
-	if (node.type === 'ReturnStatement') return expression_contains_jsx(node.argument);
+function collect_hono_dom_components(node, parent, ancestors, functions, component_references) {
+	if (!node) return;
+	if (Array.isArray(node)) {
+		for (const child of node) {
+			collect_hono_dom_components(child, parent, ancestors, functions, component_references);
+		}
+		return;
+	}
+	if (typeof node !== 'object') return;
 
+	if (is_function_node(node)) {
+		functions.push({
+			node,
+			name: get_function_binding_name(node, parent),
+			defaultExport: ancestors.some((ancestor) => ancestor.type === 'ExportDefaultDeclaration'),
+		});
+	}
+
+	if (node.type === 'JSXElement') {
+		for (const name of get_jsx_component_references(node.openingElement?.name)) {
+			component_references.add(name);
+		}
+	}
+
+	if (node.type === 'CallExpression') {
+		const name = get_jsx_factory_component_reference(node);
+		if (name) component_references.add(name);
+	}
+
+	const next_ancestors = [...ancestors, node];
 	for (const [key, value] of Object.entries(node)) {
 		if (key === 'loc' || key === 'start' || key === 'end' || key === 'metadata') continue;
-		if (function_body_contains_rendered_jsx(/** @type {AST.Node | AST.Node[] | null} */ (value)))
-			return true;
+		if (Array.isArray(value)) {
+			for (const child of value) {
+				collect_hono_dom_components(
+					/** @type {AST.Node | null} */ (child),
+					node,
+					next_ancestors,
+					functions,
+					component_references,
+				);
+			}
+		} else {
+			collect_hono_dom_components(
+				/** @type {AST.Node | null} */ (value),
+				node,
+				next_ancestors,
+				functions,
+				component_references,
+			);
+		}
 	}
-	return false;
+}
+
+/**
+ * @param {AST.Function} node
+ * @param {AST.Node | null} parent
+ * @returns {string | null}
+ */
+function get_function_binding_name(node, parent) {
+	if (node.type !== 'ArrowFunctionExpression' && node.id?.type === 'Identifier') {
+		return node.id.name;
+	}
+
+	if (parent?.type === 'VariableDeclarator' && parent.init === node) {
+		return get_static_binding_name(parent.id);
+	}
+	if (parent?.type === 'AssignmentExpression' && parent.right === node) {
+		return get_static_binding_name(parent.left);
+	}
+	if (parent?.type === 'Property' && parent.value === node) {
+		return get_static_property_name(parent.key);
+	}
+	if (parent?.type === 'MethodDefinition' && parent.value === node) {
+		return get_static_property_name(parent.key);
+	}
+	return null;
 }
 
 /**
  * @param {AST.Node | null | undefined} node
+ * @returns {string | null}
+ */
+function get_static_binding_name(node) {
+	return node?.type === 'Identifier' ? node.name : null;
+}
+
+/**
+ * @param {AST.Node | null | undefined} node
+ * @returns {string | null}
+ */
+function get_static_property_name(node) {
+	if (node?.type === 'Identifier') return node.name;
+	if (node?.type === 'Literal' && typeof node.value === 'string') return node.value;
+	return null;
+}
+
+/**
+ * @param {AST.Node | null | undefined} node
+ * @returns {string[]}
+ */
+function get_jsx_component_references(node) {
+	if (!node) return [];
+	if (node.type === 'JSXIdentifier') {
+		return is_uppercase_name(node.name) ? [node.name] : [];
+	}
+	if (node.type === 'JSXMemberExpression') {
+		return [
+			...get_jsx_component_references(node.object),
+			...(node.property?.type === 'JSXIdentifier' && is_uppercase_name(node.property.name)
+				? [node.property.name]
+				: []),
+		];
+	}
+	return [];
+}
+
+/**
+ * @param {AST.CallExpression} node
+ * @returns {string | null}
+ */
+function get_jsx_factory_component_reference(node) {
+	const callee = node.callee;
+	const callee_name =
+		callee.type === 'Identifier'
+			? callee.name
+			: callee.type === 'MemberExpression' &&
+				  !callee.computed &&
+				  callee.property.type === 'Identifier'
+				? callee.property.name
+				: null;
+	if (!callee_name || !['jsx', 'jsxs', 'jsxDEV'].includes(callee_name)) return null;
+
+	const first_argument = node.arguments[0];
+	if (first_argument?.type === 'Identifier') return first_argument.name;
+	if (
+		first_argument?.type === 'MemberExpression' &&
+		!first_argument.computed &&
+		first_argument.property.type === 'Identifier'
+	) {
+		return first_argument.property.name;
+	}
+	return null;
+}
+
+/**
+ * @param {string} name
  * @returns {boolean}
  */
-function expression_contains_jsx(node) {
-	if (!node || typeof node !== 'object') return false;
-	if (node.type?.startsWith('JSX')) return true;
-	if (node.type === 'CallExpression' || node.type === 'NewExpression') return false;
-
-	for (const [key, value] of Object.entries(node)) {
-		if (key === 'loc' || key === 'start' || key === 'end' || key === 'metadata') continue;
-		if (Array.isArray(value)) {
-			if (value.some((child) => expression_contains_jsx(child))) return true;
-		} else if (expression_contains_jsx(/** @type {AST.Node | null} */ (value))) {
-			return true;
-		}
-	}
-	return false;
+function is_uppercase_name(name) {
+	return /^[A-Z]/.test(name);
 }
 
 /**

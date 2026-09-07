@@ -123,6 +123,22 @@ describe('@tsrx/hono server compiler', () => {
 			),
 		).toThrow(/does not provide a reset callback/);
 	});
+
+	it('keeps Hono-specific adapters available in direct runtime mode', () => {
+		const { code } = compileServer(
+			`export function App() @{
+				@try {
+					<div />
+				} @catch (error) {
+					<p>{error.message}</p>
+				}
+			}`,
+			'App.tsrx',
+			{ runtimeImports: 'direct' },
+		);
+
+		expect(code).toContain("from '@tsrx/hono/error-boundary'");
+	});
 });
 
 describe('@tsrx/hono DOM compiler', () => {
@@ -188,6 +204,45 @@ describe('@tsrx/hono DOM compiler', () => {
 				`export async function App() {
 					return <div />;
 				}`,
+				'App.tsrx',
+			),
+		).toThrow(/Hono JSX DOM does not support async components/);
+	});
+
+	it('does not reject async helpers that are not rendered as components', () => {
+		expect(() =>
+			compileDom(
+				`async function makePreview() {
+					return <dialog />;
+				}
+
+				export function App() @{
+					<button onClick={() => { void makePreview(); }}>{'Open'}</button>
+				}`,
+				'App.tsrx',
+			),
+		).not.toThrow();
+	});
+
+	it('rejects async DOM components that return JSX through a promise', () => {
+		expect(() =>
+			compileDom(
+				`export async function App() {
+					return Promise.resolve(<div />);
+				}`,
+				'App.tsrx',
+			),
+		).toThrow(/Hono JSX DOM does not support async components/);
+	});
+
+	it('rejects async local components rendered through JSX', () => {
+		expect(() =>
+			compileDom(
+				`async function Card() {
+					return <div />;
+				}
+
+				export function App() @{ <Card /> }`,
 				'App.tsrx',
 			),
 		).toThrow(/Hono JSX DOM does not support async components/);

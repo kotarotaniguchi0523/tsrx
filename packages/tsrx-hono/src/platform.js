@@ -163,11 +163,10 @@ function find_async_hono_dom_component(ast) {
 	collect_hono_dom_components(ast, null, functions, component_references);
 
 	const component = functions.find(
-		({ node, name, defaultExport }) =>
-			node.async &&
-			(defaultExport ||
-				(name && is_uppercase_name(name)) ||
-				(name && component_references.has(name))),
+		({ name, defaultExport }) =>
+			defaultExport ||
+			(name && is_uppercase_name(name)) ||
+			(name && component_references.has(name)),
 	);
 	return component?.node ?? null;
 }
@@ -191,11 +190,16 @@ function collect_hono_dom_components(node, parent, functions, component_referenc
 	if (typeof node !== 'object') return;
 
 	if (is_function_node(node)) {
-		functions.push({
-			node,
-			name: get_function_binding_name(node, parent),
-			defaultExport: parent?.type === 'ExportDefaultDeclaration',
-		});
+		// Only async functions can fail the DOM component validation. Keeping
+		// synchronous helpers out of this list avoids retaining every function in
+		// a module while the rest of the AST is scanned for component references.
+		if (node.async) {
+			functions.push({
+				node,
+				name: get_function_binding_name(node, parent),
+				defaultExport: parent?.type === 'ExportDefaultDeclaration',
+			});
+		}
 	}
 
 	if (node.type === 'JSXElement') {
@@ -209,12 +213,21 @@ function collect_hono_dom_components(node, parent, functions, component_referenc
 		if (name) component_references.add(name);
 	}
 
-	for (const [key, value] of Object.entries(node)) {
+	for (const key of Object.keys(node)) {
 		if (AST_METADATA_KEYS.has(key)) continue;
-		const children = Array.isArray(value) ? value : [value];
-		for (const child of children) {
+		const value = /** @type {unknown} */ (/** @type {Record<string, unknown>} */ (node)[key]);
+		if (Array.isArray(value)) {
+			for (const child of value) {
+				collect_hono_dom_components(
+					/** @type {AST.Node | null} */ (child),
+					node,
+					functions,
+					component_references,
+				);
+			}
+		} else {
 			collect_hono_dom_components(
-				/** @type {AST.Node | null} */ (child),
+				/** @type {AST.Node | null} */ (value),
 				node,
 				functions,
 				component_references,

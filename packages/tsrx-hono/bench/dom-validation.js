@@ -24,7 +24,7 @@ function make_source(size, with_async_control) {
 	const children = Array.from({ length: size }, (_, index) => `<div>{helper(${index})}</div>`).join(
 		'',
 	);
-	return `export function App() @{ <><${children}</> }${
+	return `export function App() @{ <>${children}</> }${
 		with_async_control ? '\nasync function loadPreview() { return 1; }' : ''
 	}`;
 }

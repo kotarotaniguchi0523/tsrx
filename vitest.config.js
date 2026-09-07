@@ -3,6 +3,7 @@ import { tsrxPreact } from './packages/vite-plugin-preact/src/index.js';
 import { tsrxReact } from './packages/vite-plugin-react/src/index.js';
 import { tsrxSolid } from './packages/vite-plugin-solid/src/index.js';
 import { tsrxVue } from './packages/vite-plugin-vue/src/index.js';
+import { tsrxHono } from './packages/vite-plugin-hono/src/index.js';
 import solid from 'vite-plugin-solid';
 import { fileURLToPath } from 'node:url';
 
@@ -93,6 +94,12 @@ const vue_runtime_dependency_resolver = create_test_dependency_resolver(
 	'tsrx-vue-runtime-dependencies',
 	'./packages/vite-plugin-vue/package.json',
 	['@tsrx/vue'],
+);
+
+const hono_runtime_dependency_resolver = create_test_dependency_resolver(
+	'tsrx-hono-runtime-dependencies',
+	'./packages/vite-plugin-hono/package.json',
+	['@tsrx/hono', 'hono'],
 );
 
 const vue_runtime_alias_plugin = {
@@ -270,6 +277,16 @@ export default defineConfig({
 					globals: true,
 				},
 				plugins: [],
+			},
+			{
+				test: {
+					name: 'tsrx-hono-runtime',
+					include: ['packages/vite-plugin-hono/tests/**/*.test.tsrx'],
+					environment: 'jsdom',
+					globals: true,
+					css: true,
+				},
+				plugins: [hono_runtime_dependency_resolver, tsrxHono({ mode: 'dom' })],
 			},
 			{
 				test: {

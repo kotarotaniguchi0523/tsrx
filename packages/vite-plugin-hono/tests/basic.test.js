@@ -1,3 +1,7 @@
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { tsrxHono } from '../src/index.js';
 
@@ -13,6 +17,48 @@ describe('@tsrx/vite-plugin-hono', () => {
 		expect(transformed).not.toBeNull();
 		expect(transformed.code).toContain('hono/jsx/jsx-runtime');
 		expect(transformed.code).toContain('class');
+	});
+
+	it('runs transformed server modules with Hono SSR', async () => {
+		const plugin = tsrxHono();
+		const directory = await mkdtemp(
+			path.join(path.dirname(fileURLToPath(import.meta.url)), '.tmp-hono-'),
+		);
+
+		try {
+			const source_id = path.join(directory, 'App.tsrx');
+			const output_id = path.join(directory, 'App.js');
+			const transformed = await plugin.transform(
+				`export async function App({ items }) @{
+					const title = await Promise.resolve('Hono');
+					<>
+						<h1>{title}</h1>
+						<ul>
+							@for (const item of items) {
+								<li class="item">{item}</li>
+							}
+						</ul>
+					</>
+				}`,
+				source_id,
+			);
+			await writeFile(output_id, transformed.code);
+
+			const [{ App }, { jsx }, { renderToReadableStream }] = await Promise.all([
+				import(`${pathToFileURL(output_id).href}?test=${Date.now()}`),
+				import('hono/jsx'),
+				import('hono/jsx/streaming'),
+			]);
+
+			const stream = await renderToReadableStream(jsx(App, { items: ['one', 'two'] }));
+			let html = '';
+			for await (const chunk of stream) html += new TextDecoder().decode(chunk);
+
+			expect(html).toContain('<h1>Hono</h1>');
+			expect(html).toContain('<li class="item">one</li><li class="item">two</li>');
+		} finally {
+			await rm(directory, { recursive: true, force: true });
+		}
 	});
 
 	it('selects the Hono DOM runtime and forwards direct runtime imports', async () => {

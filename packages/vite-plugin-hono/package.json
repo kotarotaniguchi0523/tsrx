@@ -27,6 +27,7 @@
     "vite": "*"
   },
   "devDependencies": {
+    "hono": "^4.12.4",
     "typescript": "catalog:default",
     "vite": "catalog:default"
   },

@@ -209,6 +209,17 @@ describe('@tsrx/hono DOM compiler', () => {
 		).toThrow(/Hono JSX DOM does not support async components/);
 	});
 
+	it('rejects async default-exported DOM components', () => {
+		expect(() =>
+			compileDom(
+				`export default async function App() @{
+					<div />
+				}`,
+				'App.tsrx',
+			),
+		).toThrow(/Hono JSX DOM does not support async components/);
+	});
+
 	it('does not reject async helpers that are not rendered as components', () => {
 		expect(() =>
 			compileDom(
@@ -218,6 +229,24 @@ describe('@tsrx/hono DOM compiler', () => {
 
 				export function App() @{
 					<button onClick={() => { void makePreview(); }}>{'Open'}</button>
+				}`,
+				'App.tsrx',
+			),
+		).not.toThrow();
+	});
+
+	it('does not reject async loaders nested in a default-exported component', () => {
+		expect(() =>
+			compileDom(
+				`export default function App() @{
+					async function loadPreview() {
+						return 'preview';
+					}
+
+					const preview = use(loadPreview());
+					<Suspense fallback={<div>{'Loading'}</div>}>
+						<div>{preview}</div>
+					</Suspense>
 				}`,
 				'App.tsrx',
 			),

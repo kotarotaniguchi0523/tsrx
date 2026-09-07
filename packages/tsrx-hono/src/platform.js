@@ -195,7 +195,7 @@ function collect_hono_dom_components(node, parent, ancestors, functions, compone
 		functions.push({
 			node,
 			name: get_function_binding_name(node, parent),
-			defaultExport: ancestors.some((ancestor) => ancestor.type === 'ExportDefaultDeclaration'),
+			defaultExport: parent?.type === 'ExportDefaultDeclaration',
 		});
 	}
 

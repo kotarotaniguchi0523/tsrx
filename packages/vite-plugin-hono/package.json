@@ -24,10 +24,10 @@
     "@tsrx/hono": "workspace:*"
   },
   "peerDependencies": {
-    "vite": "*"
+    "vite": "^8.0.0"
   },
   "devDependencies": {
-    "hono": "^4.12.4",
+    "hono": "^4.13.7",
     "typescript": "catalog:default",
     "vite": "catalog:default"
   },

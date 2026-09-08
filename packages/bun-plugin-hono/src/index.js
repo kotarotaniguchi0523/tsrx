@@ -44,7 +44,11 @@ function should_compile(options, value) {
 /** @param {string} jsx_import_source @param {Target | undefined} target */
 function create_transpiler(jsx_import_source, target) {
 	const Transpiler = globalThis.Bun?.Transpiler;
-	if (typeof Transpiler !== 'function') return null;
+	if (typeof Transpiler !== 'function') {
+		throw new Error(
+			'@tsrx/bun-plugin-hono requires Bun.Transpiler to select the configured Hono JSX runtime.',
+		);
+	}
 
 	return new Transpiler({
 		loader: 'tsx',
@@ -112,11 +116,7 @@ export function tsrxHono(options = {}) {
 					const css_id = args.path + CSS_QUERY;
 					const output = append_css_import(code, css_id, css, emit_css);
 
-					if (transpiler) {
-						return { contents: transpiler.transformSync(output), loader: 'js' };
-					}
-
-					return { contents: output, loader: 'tsx' };
+					return { contents: transpiler.transformSync(output), loader: 'js' };
 				},
 			);
 		},

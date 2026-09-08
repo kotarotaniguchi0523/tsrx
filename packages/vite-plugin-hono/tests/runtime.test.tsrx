@@ -14,6 +14,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+	render(null, container);
 	document.body.removeChild(container);
 });
 
@@ -63,6 +64,11 @@ describe('@tsrx/vite-plugin-hono DOM runtime', () => {
 		container.querySelector('button')?.click();
 		await Promise.resolve();
 		expect(container.innerHTML).toBe('<button class="count">1</button>');
+		const button = container.querySelector('button');
+		button?.click();
+		await Promise.resolve();
+		expect(container.querySelector('button')).toBe(button);
+		expect(container.textContent).toBe('2');
 	});
 
 	it('keeps hook-bearing TSRX branches stable across renders', async () => {

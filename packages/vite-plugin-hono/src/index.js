@@ -40,8 +40,15 @@ export function tsrxHono(options = {}) {
 
 	/** @param {string} id @param {string | undefined} css */
 	function cache_css(id, css) {
-		if (css) css_cache.set(id, css);
-		else css_cache.delete(id);
+		// Retain ownership after CSS removal so HMR can serve an empty module.
+		if (css || css_cache.has(id)) css_cache.set(id, css ?? '');
+	}
+
+	/** @param {string} id */
+	function css_owner(id) {
+		if (!id.endsWith(CSS_QUERY)) return null;
+		const owner = id.slice(id.startsWith('\0') ? 1 : 0, -CSS_QUERY.length);
+		return css_cache.has(owner) ? owner : null;
 	}
 
 	function update_css_cache(/** @type {string} */ source, /** @type {string} */ id) {
@@ -72,14 +79,23 @@ export function tsrxHono(options = {}) {
 		},
 
 		resolveId(source) {
-			if (!source.includes(CSS_QUERY)) return null;
+			if (css_owner(source) === null) return null;
 			if (source.startsWith('\0')) return source;
 			return '\0' + source;
 		},
 
 		load(id) {
-			if (!id.startsWith('\0') || !id.includes(CSS_QUERY)) return null;
-			return css_cache.get(id.slice(1).split('?')[0]) ?? '';
+			if (!id.startsWith('\0')) return null;
+			const owner = css_owner(id);
+			return owner === null ? null : css_cache.get(owner);
+		},
+
+		buildStart() {
+			css_cache.clear();
+		},
+
+		watchChange(id, { event }) {
+			if (event === 'delete') css_cache.delete(id);
 		},
 
 		async transform(code, id) {

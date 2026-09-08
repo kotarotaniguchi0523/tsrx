@@ -106,16 +106,9 @@ describe('@tsrx/bun-plugin-hono', () => {
 		}
 	});
 
-	it('falls back to TSX when Bun.Transpiler is unavailable', async () => {
-		const dir = await mkdtemp(path.join(os.tmpdir(), 'tsrx-bun-plugin-hono-fallback-'));
-		try {
-			const file_path = path.join(dir, 'App.tsrx');
-			await writeFile(file_path, `export function App() @{ <div /> }`);
-			const hooks = setup_plugin();
-			const result = await load_tsrx(hooks, file_path);
-			expect(result.loader).toBe('tsx');
-		} finally {
-			await rm(dir, { recursive: true, force: true });
-		}
+	it('fails clearly when Bun.Transpiler is unavailable', () => {
+		expect(() => setup_plugin()).toThrow(
+			/@tsrx\/bun-plugin-hono requires Bun\.Transpiler to select the configured Hono JSX runtime/,
+		);
 	});
 });

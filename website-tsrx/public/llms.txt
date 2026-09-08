@@ -126,6 +126,9 @@ their TSRX compilation and install the target compiler package.
 
 ### Hono setup
 
+Requires Hono `^4.13.7` (including the JSX boundary escaping fixes). The Vite
+integration requires Vite `^8.0.0` for its Oxc transform and dependency scanner.
+
 `@tsrx/hono` has two runtime modes. The server compiler emits `hono/jsx` output;
 the DOM compiler emits `hono/jsx/dom` output and is selected by the Vite or Bun
 plugin with `mode: 'dom'`.
@@ -144,6 +147,11 @@ For browser builds, use `tsrxHono({ mode: 'dom' })`. Hono DOM components are
 synchronous; represent asynchronous work with Hono's `use(promise)` inside
 `<Suspense>`, rather than returning a Promise from an async component. Hono's
 ErrorBoundary adapter uses `fallbackRender` and does not provide a reset callback.
+
+For editor diagnostics, set `tsrx.compiler` to `@tsrx/hono/dom` in `tsconfig.json`
+and `compilerOptions.jsxImportSource` to `hono/jsx/dom` for DOM projects. For MCP
+compilation, select `target: 'hono'` and `mode: 'client'` for DOM output;
+`mode: 'server'` or omitting `mode` selects server output.
 
 The Bun integration has the same `server`/`dom` modes:
 

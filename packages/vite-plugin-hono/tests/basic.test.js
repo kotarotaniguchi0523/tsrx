@@ -147,7 +147,7 @@ describe('@tsrx/vite-plugin-hono', () => {
 				import('hono/jsx/streaming'),
 			]);
 			const stream = renderToReadableStream(jsx(StreamingPage, {}));
-			expect(await new Response(stream).text()).toContain('nonce="test-nonce"');
+			expect(await new Response(stream).text()).toMatch(/<script[^>]*nonce="test-nonce"/);
 		} finally {
 			await rm(directory, { recursive: true, force: true });
 		}
@@ -190,7 +190,7 @@ describe('@tsrx/vite-plugin-hono', () => {
 			]);
 			const stream = renderToReadableStream(jsx(ErrorStreamingPage, {}));
 			const html = await new Response(stream).text();
-			expect(html).toContain('nonce="test-nonce"');
+			expect(html).toMatch(/<script[^>]*nonce="test-nonce"/);
 			expect(html).toContain('<span>ready</span>');
 		} finally {
 			await rm(directory, { recursive: true, force: true });

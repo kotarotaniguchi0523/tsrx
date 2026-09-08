@@ -17,6 +17,15 @@ const warmup = Number(arguments_by_name.get('warmup') ?? 20);
 const samples = Number(arguments_by_name.get('samples') ?? 20);
 const sizes = [64, 512, 4096];
 
+for (const [name, value] of [
+	['warmup', warmup],
+	['samples', samples],
+]) {
+	if (!Number.isSafeInteger(value) || value <= 0) {
+		throw new Error(`${name} must be a positive integer`);
+	}
+}
+
 const candidate = await load_target(candidate_root);
 const baseline = baseline_root ? await load_target(baseline_root) : null;
 
@@ -177,7 +186,12 @@ const async_component_results = Object.fromEntries(
 		}),
 );
 
-if (new Set(Object.values(async_component_results)).size !== 1) {
+if (
+	Object.values(async_component_results).some(
+		(message) => !message?.includes('Hono JSX DOM does not support async components'),
+	) ||
+	new Set(Object.values(async_component_results)).size !== 1
+) {
 	throw new Error(`Baseline and candidate disagree: ${JSON.stringify(async_component_results)}`);
 }
 

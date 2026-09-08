@@ -1,1 +1,1 @@
-export declare const TsrxErrorBoundary: (props: Record<string, unknown>) => any;
+export { ErrorBoundary as TsrxErrorBoundary } from 'hono/jsx/dom';

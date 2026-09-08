@@ -153,26 +153,61 @@ export function validate_hono_dom_components(ast, filename, context) {
  * Find the first async function that can be used as a Hono DOM component.
  * Looking for JSX anywhere below an async function is not sufficient: event
  * handlers and other helpers may legitimately create JSX without returning it
- * to Hono's renderer. Component positions and the conventional uppercase JSX
- * binding names provide the boundary that the source AST can establish.
+ * to Hono's renderer. Component positions and exported conventional uppercase
+ * bindings provide the boundary that the source AST can establish.
  *
  * @param {AST.Program} ast
  * @returns {AST.Function | null}
  */
 function find_async_hono_dom_component(ast) {
-	/** @type {Array<{ node: AST.Function, name: string | null, defaultExport: boolean }>} */
+	/** @type {Array<{ node: AST.Function, name: string | null, defaultExport: boolean, exported: boolean }>} */
 	const functions = [];
 	const component_references = new Set();
+	const exported_names = get_exported_hono_dom_component_names(ast);
 
-	collect_hono_dom_components(ast, null, functions, component_references);
+	collect_hono_dom_components(ast, null, functions, component_references, exported_names);
 
 	const component = functions.find(
-		({ name, defaultExport }) =>
+		({ name, defaultExport, exported }) =>
 			defaultExport ||
-			(name && is_uppercase_name(name)) ||
-			(name && component_references.has(name)),
+			(name && component_references.has(name)) ||
+			(exported && name && is_uppercase_name(name)),
 	);
 	return component?.node ?? null;
+}
+
+/**
+ * @param {AST.Program} ast
+ * @returns {Set<string>}
+ */
+function get_exported_hono_dom_component_names(ast) {
+	const names = new Set();
+
+	for (const statement of ast.body) {
+		if (statement.type === 'ExportDefaultDeclaration') {
+			const declaration = statement.declaration;
+			if (declaration?.type === 'Identifier') names.add(declaration.name);
+			continue;
+		}
+		if (statement.type !== 'ExportNamedDeclaration') continue;
+
+		const declaration = statement.declaration;
+		if (declaration?.type === 'FunctionDeclaration' && declaration.id?.type === 'Identifier') {
+			names.add(declaration.id.name);
+		} else if (declaration?.type === 'VariableDeclaration') {
+			for (const declarator of declaration.declarations) {
+				const name = get_static_name(declarator.id);
+				if (name) names.add(name);
+			}
+		}
+
+		for (const specifier of statement.specifiers ?? []) {
+			const name = get_static_name(specifier.local);
+			if (name) names.add(name);
+		}
+	}
+
+	return names;
 }
 
 const AST_METADATA_KEYS = new Set(['loc', 'start', 'end', 'metadata']);
@@ -180,14 +215,21 @@ const AST_METADATA_KEYS = new Set(['loc', 'start', 'end', 'metadata']);
 /**
  * @param {AST.Node | AST.Node[] | null | undefined} node
  * @param {AST.Node | null} parent
- * @param {Array<{ node: AST.Function, name: string | null, defaultExport: boolean }>} functions
+ * @param {Array<{ node: AST.Function, name: string | null, defaultExport: boolean, exported: boolean }>} functions
  * @param {Set<string>} component_references
+ * @param {Set<string>} exported_names
  */
-function collect_hono_dom_components(node, parent, functions, component_references) {
+function collect_hono_dom_components(
+	node,
+	parent,
+	functions,
+	component_references,
+	exported_names,
+) {
 	if (!node) return;
 	if (Array.isArray(node)) {
 		for (const child of node) {
-			collect_hono_dom_components(child, parent, functions, component_references);
+			collect_hono_dom_components(child, parent, functions, component_references, exported_names);
 		}
 		return;
 	}
@@ -198,10 +240,12 @@ function collect_hono_dom_components(node, parent, functions, component_referenc
 		// synchronous helpers out of this list avoids retaining every function in
 		// a module while the rest of the AST is scanned for component references.
 		if (node.async) {
+			const name = get_function_binding_name(node, parent);
 			functions.push({
 				node,
-				name: get_function_binding_name(node, parent),
+				name,
 				defaultExport: parent?.type === 'ExportDefaultDeclaration',
+				exported: Boolean(name && exported_names.has(name)),
 			});
 		}
 	}
@@ -225,6 +269,7 @@ function collect_hono_dom_components(node, parent, functions, component_referenc
 					node,
 					functions,
 					component_references,
+					exported_names,
 				);
 			}
 		} else {
@@ -233,6 +278,7 @@ function collect_hono_dom_components(node, parent, functions, component_referenc
 				node,
 				functions,
 				component_references,
+				exported_names,
 			);
 		}
 	}
@@ -244,10 +290,7 @@ function collect_hono_dom_components(node, parent, functions, component_referenc
  * @returns {string | null}
  */
 function get_function_binding_name(node, parent) {
-	if (node.type !== 'ArrowFunctionExpression' && node.id?.type === 'Identifier') {
-		return node.id.name;
-	}
-
+	// A named expression's inner name is not its component binding.
 	if (parent?.type === 'VariableDeclarator' && parent.init === node) {
 		return get_static_name(parent.id);
 	}
@@ -259,6 +302,9 @@ function get_function_binding_name(node, parent) {
 	}
 	if (parent?.type === 'MethodDefinition' && parent.value === node) {
 		return get_static_name(parent.key, true);
+	}
+	if (node.type !== 'ArrowFunctionExpression' && node.id?.type === 'Identifier') {
+		return node.id.name;
 	}
 	return null;
 }

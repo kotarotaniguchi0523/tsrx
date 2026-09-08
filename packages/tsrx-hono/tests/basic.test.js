@@ -142,6 +142,14 @@ describe('@tsrx/hono server compiler', () => {
 });
 
 describe('@tsrx/hono DOM compiler', () => {
+	it('validates the component binding of a named async function expression', () => {
+		expect(() =>
+			compileDom(
+				'const App = async function loadView() { return <div />; }; export { App };',
+				'App.tsrx',
+			),
+		).toThrow(/does not support async components/);
+	});
 	it('does not hoist mutable Hono DOM nodes to module scope', () => {
 		const { code } = compileDom(
 			`export function App() @{
@@ -229,6 +237,21 @@ describe('@tsrx/hono DOM compiler', () => {
 
 				export function App() @{
 					<button onClick={() => { void makePreview(); }}>{'Open'}</button>
+				}`,
+				'App.tsrx',
+			),
+		).not.toThrow();
+	});
+
+	it('does not use an unexported uppercase helper name as proof of a component', () => {
+		expect(() =>
+			compileDom(
+				`async function PreviewData() {
+					return <dialog />;
+				}
+
+				export function App() @{
+					<button onClick={() => { void PreviewData(); }}>{'Open'}</button>
 				}`,
 				'App.tsrx',
 			),

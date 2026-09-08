@@ -19,6 +19,9 @@
       "default": "./src/index.js"
     }
   },
+  "scripts": {
+    "typecheck:tests": "tsrx-tsc --noEmit -p tests/tsconfig.json"
+  },
   "dependencies": {
     "@tsrx/core": "workspace:*",
     "@tsrx/hono": "workspace:*"
@@ -27,6 +30,7 @@
     "vite": "^8.0.0"
   },
   "devDependencies": {
+    "@tsrx/typescript-plugin": "workspace:*",
     "hono": "^4.13.7",
     "typescript": "catalog:default",
     "vite": "catalog:default"

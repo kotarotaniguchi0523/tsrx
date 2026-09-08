@@ -46,7 +46,7 @@ function SuspendedApp() @{
 	}
 }
 
-function Broken() @{
+function Broken(): never @{
 	throw new Error('boom');
 }
 

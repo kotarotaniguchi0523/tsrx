@@ -153,6 +153,50 @@ describe('@tsrx/vite-plugin-hono', () => {
 		}
 	});
 
+	it('preserves the StreamingContext nonce in the TSRX ErrorBoundary output', async () => {
+		const plugin = tsrxHono();
+		const directory = await mkdtemp(
+			path.join(path.dirname(fileURLToPath(import.meta.url)), '.tmp-hono-error-streaming-'),
+		);
+
+		try {
+			const source_id = path.join(directory, 'ErrorStreamingPage.tsrx');
+			const output_id = path.join(directory, 'ErrorStreamingPage.js');
+			const transformed = await plugin.transform(
+				`import { StreamingContext } from 'hono/jsx/streaming';
+
+				async function DelayedContent() {
+					await Promise.resolve();
+					return <span>{'ready'}</span>;
+				}
+
+				export function ErrorStreamingPage() @{
+					<StreamingContext value={{ scriptNonce: 'test-nonce' }}>
+						@try {
+							<DelayedContent />
+						} @catch (error) {
+							<span>{error.message}</span>
+						}
+					</StreamingContext>
+				}`,
+				source_id,
+			);
+			await writeFile(output_id, transformed.code);
+
+			const [{ ErrorStreamingPage }, { jsx }, { renderToReadableStream }] = await Promise.all([
+				import(`${pathToFileURL(output_id).href}?test=${Date.now()}`),
+				import('hono/jsx'),
+				import('hono/jsx/streaming'),
+			]);
+			const stream = renderToReadableStream(jsx(ErrorStreamingPage, {}));
+			const html = await new Response(stream).text();
+			expect(html).toContain('nonce="test-nonce"');
+			expect(html).toContain('<span>ready</span>');
+		} finally {
+			await rm(directory, { recursive: true, force: true });
+		}
+	});
+
 	it('selects the Hono DOM runtime and forwards direct runtime imports', async () => {
 		const plugin = tsrxHono({ mode: 'dom', runtimeImports: 'direct' });
 		const transformed = await plugin.transform(

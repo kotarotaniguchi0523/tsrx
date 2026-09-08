@@ -15,3 +15,6 @@ to modules owned by the plugin and clear stale CSS across builds and deletions.
 Use core lexical scope analysis when rejecting async Hono DOM components, and
 keep Hono's documented server, streaming, context, hook, CSS, and DOM runtime
 APIs available without TSRX-specific substitutes.
+
+Preserve Hono's `StreamingContext` nonce through TSRX ErrorBoundary output and
+typecheck the Hono TSRX integration tests with `tsrx-tsc`.

@@ -81,6 +81,7 @@ describe('@tsrx/hono server compiler', () => {
 		expect(code).toContain('<Suspense');
 		expect(code).toContain('<TsrxErrorBoundary');
 		expect(code).toContain('<TsrxErrorBoundary fallbackRender={');
+		expect(code).not.toContain('_reset');
 		expect(code).toContain('class="item"');
 	});
 

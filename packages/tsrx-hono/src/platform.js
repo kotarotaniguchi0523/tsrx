@@ -107,10 +107,17 @@ function create_hono_error_boundary(try_content, fallback_fn, ctx, node) {
 		);
 	}
 
+	// The core transform keeps a second reset parameter for React-shaped
+	// boundaries. Hono invokes `fallbackRender` with the error only, so remove
+	// the unused parameter from generated output and preserve Hono's public type.
+	const hono_fallback_fn = /** @type {AST.ArrowFunctionExpression} */ ({
+		...fallback_fn,
+		params: fallback_fn.params.slice(0, 1),
+	});
 	const name = b.jsx_id('TsrxErrorBoundary');
 	const fallback_render = b.jsx_attribute(
 		b.jsx_id('fallbackRender'),
-		b.jsx_expression_container(fallback_fn),
+		b.jsx_expression_container(hono_fallback_fn),
 	);
 	return b.jsx_element_fresh(
 		b.jsx_opening_element(name, [fallback_render], false),

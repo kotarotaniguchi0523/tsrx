@@ -243,6 +243,22 @@ describe('@tsrx/hono DOM compiler', () => {
 		).not.toThrow();
 	});
 
+	it('resolves DOM component references through lexical scopes', () => {
+		expect(() =>
+			compileDom(
+				`async function Card() {
+					return fetch('/data');
+				}
+
+				export function App() @{
+					const Card = () => <div>{'sync card'}</div>;
+					<Card />
+				}`,
+				'App.tsrx',
+			),
+		).not.toThrow();
+	});
+
 	it('does not use an unexported uppercase helper name as proof of a component', () => {
 		expect(() =>
 			compileDom(

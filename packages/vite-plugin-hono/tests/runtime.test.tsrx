@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { render, use, useState } from 'hono/jsx/dom';
+import { use, useState } from 'hono/jsx';
+import { createContext, render, useContext } from 'hono/jsx/dom';
+import { Style, css } from 'hono/css';
 
 let container: HTMLDivElement;
 let resolveValue: (value: string) => void;
@@ -56,6 +58,27 @@ function BoundaryApp() @{
 	}
 }
 
+const ThemeContext = createContext('light');
+
+function ThemeLabel() @{
+	<span class="theme">{useContext(ThemeContext)}</span>
+}
+
+function ContextApp() @{
+	<ThemeContext.Provider value="dark">
+		<ThemeLabel />
+	</ThemeContext.Provider>
+}
+
+function StyledApp() @{
+	<div>
+		<Style />
+		<div class={css`
+			color: red;
+		`}>{'styled'}</div>
+	</div>
+}
+
 describe('@tsrx/vite-plugin-hono DOM runtime', () => {
 	it('renders and updates Hono DOM state', async () => {
 		render(<Counter />, container);
@@ -69,6 +92,21 @@ describe('@tsrx/vite-plugin-hono DOM runtime', () => {
 		await Promise.resolve();
 		expect(container.querySelector('button')).toBe(button);
 		expect(container.textContent).toBe('2');
+	});
+
+	it('supports Hono hooks imported from hono/jsx with the DOM renderer', () => {
+		render(<ContextApp />, container);
+
+		expect(container.innerHTML).toBe('<span class="theme">dark</span>');
+	});
+
+	it('composes Hono css and Style with the DOM target', async () => {
+		render(<StyledApp />, container);
+
+		expect(container.querySelector('style')?.id).toBe('hono-css');
+		expect(container.textContent).toBe('styled');
+		await Promise.resolve();
+		expect(container.querySelector('style')?.sheet?.cssRules[0].cssText).toContain('color: red');
 	});
 
 	it('keeps hook-bearing TSRX branches stable across renders', async () => {

@@ -1,6 +1,6 @@
 /** @import * as AST from 'estree' */
 /** @import * as ESTreeJSX from 'estree-jsx' */
-/** @import { JsxPlatform, JsxTransformContext } from '@tsrx/core/types' */
+/** @import { JsxPlatform, JsxTransformContext, TSRXAnalysisResult } from '@tsrx/core/types' */
 
 import { builders as b, createJsxTransform, error } from '@tsrx/core';
 
@@ -130,14 +130,14 @@ export const hono_dom_transform = createJsxTransform(create_hono_platform('dom')
  *
  * @param {AST.Program} ast
  * @param {string} filename
- * @param {{ source?: string, errors?: import('@tsrx/core/types').CompileError[], comments: AST.CommentWithLocation[] }} context
+ * @param {{ source?: string, errors?: import('@tsrx/core/types').CompileError[], comments: AST.CommentWithLocation[], analysis: TSRXAnalysisResult }} context
  */
 export function validate_hono_dom_components(ast, filename, context) {
 	// Async components are the only unsupported shape. Avoid a second full AST
 	// walk for the common case where the source cannot contain an async function.
 	if (context.source && !context.source.includes('async')) return;
 
-	const component = find_async_hono_dom_component(ast);
+	const component = find_async_hono_dom_component(ast, context.analysis);
 	if (!component) return;
 
 	error(
@@ -157,23 +157,55 @@ export function validate_hono_dom_components(ast, filename, context) {
  * bindings provide the boundary that the source AST can establish.
  *
  * @param {AST.Program} ast
+ * @param {TSRXAnalysisResult} analysis
  * @returns {AST.Function | null}
  */
-function find_async_hono_dom_component(ast) {
-	/** @type {Array<{ node: AST.Function, name: string | null, defaultExport: boolean, exported: boolean }>} */
+function find_async_hono_dom_component(ast, analysis) {
+	/** @type {Array<{ node: AST.Function, binding: import('@tsrx/core/types').Binding | null, name: string | null, defaultExport: boolean, exported: boolean }>} */
 	const functions = [];
-	const component_references = new Set();
 	const exported_names = get_exported_hono_dom_component_names(ast);
+	const default_export_names = get_default_hono_dom_component_names(ast);
+	/** @type {Map<import('@tsrx/core/types').Binding, AST.Function>} */
+	const candidate_bindings = new Map();
+	/** @type {Map<AST.Function, AST.Function>} */
+	const candidate_nodes = new Map();
 
-	collect_hono_dom_components(ast, null, functions, component_references, exported_names);
+	collect_async_hono_dom_components(
+		ast,
+		null,
+		analysis.scopes.get(ast),
+		analysis.scopes,
+		functions,
+		candidate_bindings,
+		candidate_nodes,
+		exported_names,
+		default_export_names,
+	);
 
 	const component = functions.find(
-		({ name, defaultExport, exported }) =>
+		({ node, name, defaultExport, exported }) =>
 			defaultExport ||
-			(name && component_references.has(name)) ||
-			(exported && name && is_uppercase_name(name)),
+			(name && default_export_names.has(name)) ||
+			(exported && name && is_uppercase_name(name)) ||
+			candidate_nodes.has(node),
 	);
-	return component?.node ?? null;
+	if (component && (component.defaultExport || component.exported || component.name)) {
+		if (
+			component.defaultExport ||
+			(component.name &&
+				(default_export_names.has(component.name) ||
+					(component.exported && is_uppercase_name(component.name))))
+		) {
+			return component.node;
+		}
+	}
+
+	return find_referenced_async_hono_dom_component(
+		ast,
+		analysis.scopes.get(ast),
+		analysis.scopes,
+		candidate_bindings,
+	);
 }
 
 /**
@@ -210,53 +242,95 @@ function get_exported_hono_dom_component_names(ast) {
 	return names;
 }
 
+/**
+ * @param {AST.Program} ast
+ * @returns {Set<string>}
+ */
+function get_default_hono_dom_component_names(ast) {
+	const names = new Set();
+
+	for (const statement of ast.body) {
+		if (statement.type !== 'ExportDefaultDeclaration') continue;
+		const declaration = statement.declaration;
+		if (declaration?.type === 'Identifier') names.add(declaration.name);
+		if (
+			(declaration?.type === 'FunctionDeclaration' || declaration?.type === 'FunctionExpression') &&
+			declaration.id?.type === 'Identifier'
+		) {
+			names.add(declaration.id.name);
+		}
+	}
+
+	return names;
+}
+
 const AST_METADATA_KEYS = new Set(['loc', 'start', 'end', 'metadata']);
 
 /**
  * @param {AST.Node | AST.Node[] | null | undefined} node
  * @param {AST.Node | null} parent
- * @param {Array<{ node: AST.Function, name: string | null, defaultExport: boolean, exported: boolean }>} functions
- * @param {Set<string>} component_references
+ * @param {import('@tsrx/core/types').ScopeInterface | null | undefined} scope
+ * @param {Map<AST.Node, import('@tsrx/core/types').ScopeInterface>} scopes
+ * @param {Array<{ node: AST.Function, binding: import('@tsrx/core/types').Binding | null, name: string | null, defaultExport: boolean, exported: boolean }>} functions
+ * @param {Map<import('@tsrx/core/types').Binding, AST.Function>} candidate_bindings
+ * @param {Map<AST.Function, AST.Function>} candidate_nodes
  * @param {Set<string>} exported_names
+ * @param {Set<string>} default_export_names
  */
-function collect_hono_dom_components(
+function collect_async_hono_dom_components(
 	node,
 	parent,
+	scope,
+	scopes,
 	functions,
-	component_references,
+	candidate_bindings,
+	candidate_nodes,
 	exported_names,
+	default_export_names,
 ) {
 	if (!node) return;
 	if (Array.isArray(node)) {
 		for (const child of node) {
-			collect_hono_dom_components(child, parent, functions, component_references, exported_names);
+			collect_async_hono_dom_components(
+				child,
+				parent,
+				scope,
+				scopes,
+				functions,
+				candidate_bindings,
+				candidate_nodes,
+				exported_names,
+				default_export_names,
+			);
 		}
 		return;
 	}
 	if (typeof node !== 'object') return;
 
 	if (is_function_node(node)) {
-		// Only async functions can fail the DOM component validation. Keeping
-		// synchronous helpers out of this list avoids retaining every function in
-		// a module while the rest of the AST is scanned for component references.
 		if (node.async) {
-			const name = get_function_binding_name(node, parent);
-			functions.push({
+			const binding = find_function_binding(node, scope);
+			const name = binding?.node?.name ?? null;
+			const default_export = parent?.type === 'ExportDefaultDeclaration';
+			const candidate = {
 				node,
+				binding,
 				name,
-				defaultExport: parent?.type === 'ExportDefaultDeclaration',
+				defaultExport: default_export,
 				exported: Boolean(name && exported_names.has(name)),
+			};
+			functions.push({
+				...candidate,
 			});
+			if (binding) candidate_bindings.set(binding, node);
+			if (
+				default_export ||
+				(name &&
+					(default_export_names.has(name) || (candidate.exported && is_uppercase_name(name))))
+			) {
+				candidate_nodes.set(node, node);
+			}
 		}
-	}
-
-	if (node.type === 'JSXElement') {
-		add_jsx_component_references(node.openingElement?.name, component_references);
-	}
-
-	if (node.type === 'CallExpression') {
-		const name = get_jsx_factory_component_reference(node);
-		if (name) component_references.add(name);
 	}
 
 	for (const key of Object.keys(node)) {
@@ -264,21 +338,29 @@ function collect_hono_dom_components(
 		const value = /** @type {unknown} */ (/** @type {Record<string, unknown>} */ (node)[key]);
 		if (Array.isArray(value)) {
 			for (const child of value) {
-				collect_hono_dom_components(
+				collect_async_hono_dom_components(
 					/** @type {AST.Node | null} */ (child),
 					node,
+					scopes.get(node) ?? scope,
+					scopes,
 					functions,
-					component_references,
+					candidate_bindings,
+					candidate_nodes,
 					exported_names,
+					default_export_names,
 				);
 			}
 		} else {
-			collect_hono_dom_components(
+			collect_async_hono_dom_components(
 				/** @type {AST.Node | null} */ (value),
 				node,
+				scopes.get(node) ?? scope,
+				scopes,
 				functions,
-				component_references,
+				candidate_bindings,
+				candidate_nodes,
 				exported_names,
+				default_export_names,
 			);
 		}
 	}
@@ -286,59 +368,90 @@ function collect_hono_dom_components(
 
 /**
  * @param {AST.Function} node
- * @param {AST.Node | null} parent
- * @returns {string | null}
+ * @param {import('@tsrx/core/types').ScopeInterface | null | undefined} scope
+ * @returns {import('@tsrx/core/types').Binding | null}
  */
-function get_function_binding_name(node, parent) {
-	// A named expression's inner name is not its component binding.
-	if (parent?.type === 'VariableDeclarator' && parent.init === node) {
-		return get_static_name(parent.id);
-	}
-	if (parent?.type === 'AssignmentExpression' && parent.right === node) {
-		return get_static_name(parent.left);
-	}
-	if (parent?.type === 'Property' && parent.value === node) {
-		return get_static_name(parent.key, true);
-	}
-	if (parent?.type === 'MethodDefinition' && parent.value === node) {
-		return get_static_name(parent.key, true);
-	}
-	if (node.type !== 'ArrowFunctionExpression' && node.id?.type === 'Identifier') {
-		return node.id.name;
-	}
-	return null;
-}
 
-/**
- * @param {AST.Node | null | undefined} node
- * @param {boolean} [allow_literal]
- * @returns {string | null}
- */
-function get_static_name(node, allow_literal = false) {
-	if (node?.type === 'Identifier') return node.name;
-	if (allow_literal && node?.type === 'Literal' && typeof node.value === 'string') {
-		return node.value;
-	}
-	return null;
-}
-
-/**
- * @param {AST.Node | null | undefined} node
- * @param {Set<string>} component_references
- */
-function add_jsx_component_references(node, component_references) {
-	if (!node) return;
-	if (node.type === 'JSXIdentifier') {
-		if (is_uppercase_name(node.name)) component_references.add(node.name);
-		return;
-	}
-	if (node.type === 'JSXMemberExpression') {
-		add_jsx_component_references(node.object, component_references);
-		if (node.property?.type === 'JSXIdentifier' && is_uppercase_name(node.property.name)) {
-			component_references.add(node.property.name);
+function find_function_binding(node, scope) {
+	for (let current = scope; current; current = current.parent) {
+		for (const binding of current.declarations.values()) {
+			if (binding.initial === node) return binding;
 		}
-		return;
 	}
+	return null;
+}
+
+/**
+ * @param {AST.Node | null | undefined} node
+ * @returns {string | null}
+ */
+function get_static_name(node) {
+	if (node?.type === 'Identifier') return node.name;
+	return null;
+}
+
+/**
+ * @param {AST.Node | AST.Node[] | null | undefined} node
+ * @param {import('@tsrx/core/types').ScopeInterface | null | undefined} scope
+ * @param {Map<AST.Node, import('@tsrx/core/types').ScopeInterface>} scopes
+ * @param {Map<import('@tsrx/core/types').Binding, AST.Function>} candidate_bindings
+ * @returns {AST.Function | null}
+ */
+
+function find_referenced_async_hono_dom_component(node, scope, scopes, candidate_bindings) {
+	if (!node) return null;
+	if (Array.isArray(node)) {
+		for (const child of node) {
+			const component = find_referenced_async_hono_dom_component(
+				child,
+				scope,
+				scopes,
+				candidate_bindings,
+			);
+			if (component) return component;
+		}
+		return null;
+	}
+	if (typeof node !== 'object') return null;
+
+	const node_scope = scopes.get(node) ?? scope;
+	let name = null;
+	if (node.type === 'JSXElement') {
+		name = get_jsx_component_reference_name(node.openingElement?.name);
+	} else if (node.type === 'CallExpression') {
+		name = get_jsx_factory_component_reference(node);
+	}
+	if (name && is_uppercase_name(name)) {
+		const binding = node_scope?.get(name);
+		const component = binding && candidate_bindings.get(binding);
+		if (component) return component;
+	}
+
+	for (const key of Object.keys(node)) {
+		if (AST_METADATA_KEYS.has(key)) continue;
+		const value = /** @type {unknown} */ (/** @type {Record<string, unknown>} */ (node)[key]);
+		const component = find_referenced_async_hono_dom_component(
+			/** @type {AST.Node | AST.Node[] | null} */ (value),
+			node_scope,
+			scopes,
+			candidate_bindings,
+		);
+		if (component) return component;
+	}
+	return null;
+}
+
+/**
+ * @param {AST.Node | null | undefined} node
+ * @returns {string | null}
+ */
+function get_jsx_component_reference_name(node) {
+	if (!node) return null;
+	if (node.type === 'JSXIdentifier') return node.name;
+	if (node.type === 'JSXMemberExpression') {
+		return get_jsx_component_reference_name(node.object);
+	}
+	return null;
 }
 
 /**
@@ -364,7 +477,7 @@ function get_jsx_factory_component_reference(node) {
 		!first_argument.computed &&
 		first_argument.property.type === 'Identifier'
 	) {
-		return first_argument.property.name;
+		return first_argument.object.type === 'Identifier' ? first_argument.object.name : null;
 	}
 	return null;
 }

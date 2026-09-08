@@ -106,6 +106,16 @@ describe('@tsrx/bun-plugin-hono', () => {
 		}
 	});
 
+	it("does not claim another plugin's virtual CSS module", async () => {
+		install_transpiler_stub();
+		const hooks = setup_plugin();
+		const resolve = hooks.onResolve.find(({ options }) =>
+			options.filter.test('/other.css?tsrx-css&lang.css'),
+		);
+
+		expect(resolve.callback({ path: '/other.css?tsrx-css&lang.css' })).toBeUndefined();
+	});
+
 	it('fails clearly when Bun.Transpiler is unavailable', () => {
 		expect(() => setup_plugin()).toThrow(
 			/@tsrx\/bun-plugin-hono requires Bun\.Transpiler to select the configured Hono JSX runtime/,

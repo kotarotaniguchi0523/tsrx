@@ -8,6 +8,7 @@ import { compile as compileDom } from '@tsrx/hono/dom';
 const DEFAULT_INCLUDE = /\.tsrx$/;
 const CSS_QUERY = '?tsrx-css&lang.css';
 const CSS_QUERY_PATTERN = /\?tsrx-css&lang\.css$/;
+const CSS_NAMESPACE = '@tsrx/bun-plugin-hono-css';
 
 /**
  * @typedef {'server' | 'dom'} TsrxHonoMode
@@ -99,9 +100,12 @@ export function tsrxHono(options = {}) {
 			const build_config = build.config ?? {};
 			const transpiler = create_transpiler(jsx_import_source, build_config.target);
 
-			build.onResolve({ filter: CSS_QUERY_PATTERN }, (args) => ({ path: args.path }));
+			build.onResolve({ filter: CSS_QUERY_PATTERN }, (args) => {
+				if (!css_cache.has(args.path)) return undefined;
+				return { path: args.path, namespace: CSS_NAMESPACE };
+			});
 
-			build.onLoad({ filter: CSS_QUERY_PATTERN }, (args) => ({
+			build.onLoad({ filter: CSS_QUERY_PATTERN, namespace: CSS_NAMESPACE }, (args) => ({
 				contents: css_cache.get(args.path) ?? '',
 				loader: 'css',
 			}));

@@ -148,6 +148,22 @@ synchronous; represent asynchronous work with Hono's `use(promise)` inside
 `<Suspense>`, rather than returning a Promise from an async component. Hono's
 ErrorBoundary adapter uses `fallbackRender` and does not provide a reset callback.
 
+The generated server JSX can be used with Hono's normal `c.html()` response, or
+with `c.render()` and `jsxRenderer` for layouts and `useRequestContext()`. For
+streaming Suspense, use Hono's `hono/jsx/streaming` APIs or the renderer's
+`stream` option. `StreamingContext` remains an application-level Hono context
+for passing script nonces; TSRX does not replace or manage it.
+
+The DOM target uses Hono's normal `render()`/`createRoot()` APIs. Hooks and
+Context remain Hono APIs: the documented pattern may import hooks from
+`hono/jsx` while the JSX runtime is selected with `hono/jsx/dom`. Hono's
+`hono/css`/`Style`, custom JSX elements, and module-augmented intrinsic element
+types are also used directly; TSRX does not provide substitutes for them.
+
+This integration targets the documented JSX and Client Components boundaries. It
+does not claim that Hono's server and DOM runtimes have identical hook or async
+semantics.
+
 For editor diagnostics, set `tsrx.compiler` to `@tsrx/hono/dom` in `tsconfig.json`
 and `compilerOptions.jsxImportSource` to `hono/jsx/dom` for DOM projects. For MCP
 compilation, select `target: 'hono'` and `mode: 'client'` for DOM output;

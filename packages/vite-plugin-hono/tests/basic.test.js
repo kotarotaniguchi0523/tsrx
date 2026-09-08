@@ -61,6 +61,98 @@ describe('@tsrx/vite-plugin-hono', () => {
 		}
 	});
 
+	it('works with c.html, c.render, and the JSX renderer context', async () => {
+		const plugin = tsrxHono();
+		const directory = await mkdtemp(
+			path.join(path.dirname(fileURLToPath(import.meta.url)), '.tmp-hono-renderer-'),
+		);
+
+		try {
+			const source_id = path.join(directory, 'Page.tsrx');
+			const output_id = path.join(directory, 'Page.js');
+			const transformed = await plugin.transform(
+				`import { useRequestContext } from 'hono/jsx-renderer';
+
+				export function SimplePage() @{
+					<p>{'html page'}</p>
+				}
+
+				export function Page() @{
+					const context = useRequestContext();
+					<p>{context.req.path}</p>
+				}`,
+				source_id,
+			);
+			await writeFile(output_id, transformed.code);
+
+			const [{ Page, SimplePage }, { Hono }, { jsx }, { jsxRenderer }] = await Promise.all([
+				import(`${pathToFileURL(output_id).href}?test=${Date.now()}`),
+				import('hono'),
+				import('hono/jsx'),
+				import('hono/jsx-renderer'),
+			]);
+
+			const app = new Hono();
+			app.get('/html', (c) => c.html(jsx(SimplePage, {})));
+			app.use(
+				'/page/*',
+				jsxRenderer(({ children }) =>
+					jsx(
+						'html',
+						null,
+						jsx('body', null, ...(Array.isArray(children) ? children : [children])),
+					),
+				),
+			);
+			app.get('/page/info', (c) => c.render(jsx(Page, {})));
+
+			expect(await (await app.request('/html')).text()).toContain('<p>html page</p>');
+			expect(await (await app.request('/page/info')).text()).toContain('<p>/page/info</p>');
+		} finally {
+			await rm(directory, { recursive: true, force: true });
+		}
+	});
+
+	it('preserves Hono StreamingContext around generated Suspense output', async () => {
+		const plugin = tsrxHono();
+		const directory = await mkdtemp(
+			path.join(path.dirname(fileURLToPath(import.meta.url)), '.tmp-hono-streaming-'),
+		);
+
+		try {
+			const source_id = path.join(directory, 'StreamingPage.tsrx');
+			const output_id = path.join(directory, 'StreamingPage.js');
+			const transformed = await plugin.transform(
+				`import { StreamingContext, Suspense } from 'hono/jsx/streaming';
+
+				async function AsyncContent() {
+					await Promise.resolve();
+					return <span>{'ready'}</span>;
+				}
+
+				export function StreamingPage() @{
+					<StreamingContext value={{ scriptNonce: 'test-nonce' }}>
+						<Suspense fallback={<span>{'loading'}</span>}>
+							<AsyncContent />
+						</Suspense>
+					</StreamingContext>
+				}`,
+				source_id,
+			);
+			await writeFile(output_id, transformed.code);
+
+			const [{ StreamingPage }, { jsx }, { renderToReadableStream }] = await Promise.all([
+				import(`${pathToFileURL(output_id).href}?test=${Date.now()}`),
+				import('hono/jsx'),
+				import('hono/jsx/streaming'),
+			]);
+			const stream = renderToReadableStream(jsx(StreamingPage, {}));
+			expect(await new Response(stream).text()).toContain('nonce="test-nonce"');
+		} finally {
+			await rm(directory, { recursive: true, force: true });
+		}
+	});
+
 	it('selects the Hono DOM runtime and forwards direct runtime imports', async () => {
 		const plugin = tsrxHono({ mode: 'dom', runtimeImports: 'direct' });
 		const transformed = await plugin.transform(

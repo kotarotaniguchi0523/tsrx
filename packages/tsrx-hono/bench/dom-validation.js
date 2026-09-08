@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { analyzeTsrx } from '@tsrx/core';
 
 const arguments_by_name = new Map(
 	process.argv.slice(2).map((argument) => {
@@ -64,11 +65,12 @@ function count_ast_nodes(node, seen = new Set()) {
 	return count;
 }
 
-function validate(target, source, ast) {
+function validate(target, source, ast, analysis) {
 	try {
 		target.platform.validate_hono_dom_components(ast, 'Perf.tsrx', {
 			source,
 			comments: [],
+			analysis,
 		});
 		return null;
 	} catch (error) {
@@ -89,7 +91,7 @@ function median(values) {
 	return sorted[Math.floor(sorted.length / 2)];
 }
 
-function measure(targets, source, asts, iterations) {
+function measure(targets, source, asts, analyses, iterations) {
 	const order = [
 		'baseline',
 		'candidate',
@@ -106,7 +108,7 @@ function measure(targets, source, asts, iterations) {
 		if (!targets[name]) continue;
 		for (let index = 0; index < warmup; index++) {
 			for (let iteration = 0; iteration < iterations; iteration++) {
-				validate(targets[name], source, asts[name]);
+				validate(targets[name], source, asts[name], analyses[name]);
 			}
 		}
 	}
@@ -116,7 +118,7 @@ function measure(targets, source, asts, iterations) {
 			if (!targets[name]) continue;
 			const started = process.hrtime.bigint();
 			for (let iteration = 0; iteration < iterations; iteration++) {
-				validate(targets[name], source, asts[name]);
+				validate(targets[name], source, asts[name], analyses[name]);
 			}
 			const elapsed_ms = Number(process.hrtime.bigint() - started) / 1e6;
 			times[name].push(elapsed_ms / iterations);
@@ -152,10 +154,15 @@ for (const with_async_control of [false, true]) {
 				.filter(([, target]) => target)
 				.map(([name, target]) => [name, target.dom.parse(source, 'Perf.tsrx')]),
 		);
+		const analyses = Object.fromEntries(
+			Object.entries(targets)
+				.filter(([, target]) => target)
+				.map(([name]) => [name, analyzeTsrx(asts[name], 'Perf.tsrx')]),
+		);
 		const validation = Object.fromEntries(
 			Object.entries(targets)
 				.filter(([, target]) => target)
-				.map(([name, target]) => [name, validate(target, source, asts[name])]),
+				.map(([name, target]) => [name, validate(target, source, asts[name], analyses[name])]),
 		);
 
 		if (new Set(Object.values(validation)).size !== 1 || Object.values(validation)[0] !== null) {
@@ -171,7 +178,13 @@ for (const with_async_control of [false, true]) {
 			ast_nodes: count_ast_nodes(asts.candidate),
 			checksum: checksum(source, validation.candidate),
 			iterations: size <= 64 ? 200 : size <= 512 ? 40 : 4,
-			measurements: measure(targets, source, asts, size <= 64 ? 200 : size <= 512 ? 40 : 4),
+			measurements: measure(
+				targets,
+				source,
+				asts,
+				analyses,
+				size <= 64 ? 200 : size <= 512 ? 40 : 4,
+			),
 		});
 	}
 }
@@ -182,7 +195,8 @@ const async_component_results = Object.fromEntries(
 		.filter(([, target]) => target)
 		.map(([name, target]) => {
 			const ast = target.dom.parse(async_component_source, 'AsyncComponent.tsrx');
-			return [name, validate(target, async_component_source, ast)];
+			const analysis = analyzeTsrx(ast, 'AsyncComponent.tsrx');
+			return [name, validate(target, async_component_source, ast, analysis)];
 		}),
 );
 

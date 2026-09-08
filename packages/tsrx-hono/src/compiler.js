@@ -1,5 +1,5 @@
 /** @import * as AST from 'estree' */
-/** @import { BaseCompileOptions, CompileError, CompileResult, JsxTransformOptions, JsxTransformResult, ParseOptions, VolarMappingsResult } from '@tsrx/core/types' */
+/** @import { BaseCompileOptions, CompileError, CompileResult, JsxTransformOptions, JsxTransformResult, ParseOptions, TSRXAnalysisResult, VolarMappingsResult } from '@tsrx/core/types' */
 /** @import { NonEmptyString } from '@tsrx/core/types/helpers' */
 
 import { analyzeTsrx, createVolarMappingsResult, dedupeMappings, parseModule } from '@tsrx/core';
@@ -8,7 +8,7 @@ import { analyzeTsrx, createVolarMappingsResult, dedupeMappings, parseModule } f
  * Create the public compiler facade shared by the Hono server and DOM targets.
  *
  * @param {(ast: AST.Program, source: string, filename?: string, options?: JsxTransformOptions) => JsxTransformResult} transform
- * @param {{ typeOnlyModuleScopedHookComponents?: boolean, validate?: (ast: AST.Program, filename: NonEmptyString<string>, context: { source: string, errors?: CompileError[], comments: AST.CommentWithLocation[], collect: boolean }) => void }} [settings]
+ * @param {{ typeOnlyModuleScopedHookComponents?: boolean, validate?: (ast: AST.Program, filename: NonEmptyString<string>, context: { source: string, errors?: CompileError[], comments: AST.CommentWithLocation[], collect: boolean, analysis: TSRXAnalysisResult }) => void }} [settings]
  */
 export function createCompiler(transform, settings = {}) {
 	/**
@@ -36,7 +36,7 @@ export function createCompiler(transform, settings = {}) {
 			filename,
 			collect ? { collect: true, loose: !!options?.loose, errors, comments } : undefined,
 		);
-		analyzeTsrx(
+		const analysis = analyzeTsrx(
 			ast,
 			filename,
 			collect ? { collect: true, loose: !!options?.loose, errors, comments } : undefined,
@@ -46,6 +46,7 @@ export function createCompiler(transform, settings = {}) {
 			errors: collect ? errors : undefined,
 			comments,
 			collect,
+			analysis,
 		});
 		const { ast: _ast, ...result } = transform(
 			ast,
@@ -74,14 +75,14 @@ export function createCompiler(transform, settings = {}) {
 			errors,
 			comments,
 		});
-		analyzeTsrx(ast, filename, {
+		const analysis = analyzeTsrx(ast, filename, {
 			collect: true,
 			loose: !!options?.loose,
 			typeOnly: true,
 			errors,
 			comments,
 		});
-		settings.validate?.(ast, filename, { source, errors, comments, collect: true });
+		settings.validate?.(ast, filename, { source, errors, comments, collect: true, analysis });
 		const transformed = transform(ast, source, filename, {
 			...options,
 			collect: true,

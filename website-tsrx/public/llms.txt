@@ -4,7 +4,7 @@
 
 TSRX (TypeScript Render Extensions) is a **TypeScript language extension** for
 building declarative UIs. It compiles one `.tsrx` source file to **Octane**,
-**React**, **Preact**, **Solid**, **Vue**, or **Ripple**. TSRX is the
+**React**, **Preact**, **Solid**, **Vue**, **Hono**, or **Ripple**. TSRX is the
 source language; the target picks the runtime semantics.
 
 Think of TSRX as a spiritual successor to JSX: the same mental model of
@@ -15,7 +15,7 @@ them all the way through to the compiled output.
 
 **Key characteristics:**
 
-- **One source, many targets**: `octane`, `@tsrx/react`, `@tsrx/preact`, `@tsrx/solid`, `@tsrx/vue`, `@tsrx/ripple`
+- **One source, many targets**: `octane`, `@tsrx/react`, `@tsrx/preact`, `@tsrx/solid`, `@tsrx/vue`, `@tsrx/hono`, `@tsrx/ripple`
 - **JSX-shaped templates**: JSX elements, fragments, text, and expression containers use standard JSX node shapes
 - **JSX statement containers**: `@{ ... }` keeps TypeScript setup local to the JSX that uses it
 - **Declarative control flow**: `@if`, `@for`, `@switch`, and `@try` are JSX expressions whose bodies use `{...}` template blocks
@@ -27,7 +27,8 @@ them all the way through to the compiled output.
 **Canonical compiler packages**: `@tsrx/core` (framework-agnostic
 parser/analyzer), `@tsrx/react` (React codegen), `@tsrx/preact` (Preact codegen),
 `@tsrx/solid` (Solid codegen), `@tsrx/vue` (Vue/Vapor codegen), `@tsrx/ripple`
-(Ripple codegen), and `octane/compiler` (Octane codegen).
+(Ripple codegen), `@tsrx/hono` (Hono JSX server and DOM codegen), and
+`octane/compiler` (Octane codegen).
 
 ## Installation & Targets
 
@@ -58,6 +59,11 @@ npm install @tsrx/vue vue vue-jsx-vapor
 npm install -D @tsrx/vite-plugin-vue
 npm install -D @tsrx/rspack-plugin-vue
 npm install -D @tsrx/bun-plugin-vue        # Bun
+
+# Hono target
+npm install @tsrx/hono hono
+npm install -D @tsrx/vite-plugin-hono      # Vite
+npm install -D @tsrx/bun-plugin-hono       # Bun
 
 # Ripple target
 npm install ripple @ripple-ts/vite-plugin
@@ -154,6 +160,12 @@ libraries can instead depend on the matching small runtime package:
 `@tsrx/react-runtime`, `@tsrx/preact-runtime`, `@tsrx/solid-runtime`, or
 `@tsrx/vue-runtime`.
 
+Hono does not publish a separate standalone runtime package. Its default compiler
+mode uses `@tsrx/hono/*` helper subpaths. In `runtimeImports: 'direct'` mode,
+shared helpers use `@tsrx/core/runtime/*`, but Hono-specific adapters still use
+`@tsrx/hono/*`; declare `@tsrx/core` and `@tsrx/hono` directly when using that
+mode.
+
 Pass `runtimeImports: 'direct'` to a target compiler or its Vite, Rspack, or Bun
 integration to emit those direct runtime imports. React's Turbopack helper accepts
 the same option as its second argument:
@@ -188,6 +200,63 @@ For published components, keep the compiler and build integration in
 `devDependencies` and put the matching runtime in `dependencies`. The default
 `runtimeImports: 'compiler'` mode remains appropriate for applications that own
 their TSRX compilation and install the target compiler package.
+
+### Hono setup
+
+Requires Hono `^4.13.7` (including the JSX boundary escaping fixes). The Vite
+integration requires Vite `^8.0.0` for its Oxc transform and dependency scanner.
+
+`@tsrx/hono` has two runtime modes. The server compiler emits `hono/jsx` output;
+the DOM compiler emits `hono/jsx/dom` output and is selected by the Vite or Bun
+plugin with `mode: 'dom'`.
+
+```ts
+// vite.config.ts
+import { defineConfig } from 'vite';
+import tsrxHono from '@tsrx/vite-plugin-hono';
+
+export default defineConfig({
+	plugins: [tsrxHono({ mode: 'server' })],
+});
+```
+
+For browser builds, use `tsrxHono({ mode: 'dom' })`. Hono DOM components are
+synchronous; represent asynchronous work with Hono's `use(promise)` inside
+`<Suspense>`, rather than returning a Promise from an async component. Hono's
+ErrorBoundary adapter uses `fallbackRender` and does not provide a reset callback.
+
+The generated server JSX can be used with Hono's normal `c.html()` response, or
+with `c.render()` and `jsxRenderer` for layouts and `useRequestContext()`. For
+streaming Suspense, use Hono's `hono/jsx/streaming` APIs or the renderer's
+`stream` option. `StreamingContext` remains an application-level Hono context
+for passing script nonces; TSRX does not replace or manage it.
+
+The DOM target uses Hono's normal `render()`/`createRoot()` APIs. Hooks and
+Context remain Hono APIs: the documented pattern may import hooks from
+`hono/jsx` while the JSX runtime is selected with `hono/jsx/dom`. Hono's
+`hono/css`/`Style`, custom JSX elements, and module-augmented intrinsic element
+types are also used directly; TSRX does not provide substitutes for them.
+
+This integration targets the documented JSX and Client Components boundaries. It
+does not claim that Hono's server and DOM runtimes have identical hook or async
+semantics.
+
+For editor diagnostics, set `tsrx.compiler` to `@tsrx/hono/dom` in `tsconfig.json`
+and `compilerOptions.jsxImportSource` to `hono/jsx/dom` for DOM projects. For MCP
+compilation, select `target: 'hono'` and `mode: 'client'` for DOM output;
+`mode: 'server'` or omitting `mode` selects server output.
+
+The Bun integration has the same `server`/`dom` modes:
+
+```ts
+import tsrxHono from '@tsrx/bun-plugin-hono';
+
+await Bun.build({
+	entrypoints: ['./src/App.tsrx'],
+	outdir: './dist',
+	plugins: [tsrxHono({ mode: 'server' })],
+});
+```
 
 ### Octane setup
 

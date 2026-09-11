@@ -6,6 +6,8 @@ import { readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { isAbsolute, resolve as pathResolve } from 'node:path';
 import { compile } from '@tsrx/vue';
+import { mergePlatformDefinitions, validatePlatform } from '@tsrx/core';
+import { resolveBuildPlatform } from '@tsrx/core/config';
 import { createDepScanLoadPlugin } from '@tsrx/core/vite/dep-scan';
 import vueJsxVaporModule from 'vue-jsx-vapor/vite';
 import { createVaporInteropPlugin } from './interop.js';
@@ -77,6 +79,8 @@ function resolve_vapor_options(options) {
  * @returns {Plugin}
  */
 function create_tsrx_vue_plugin(options) {
+	const explicit_platform = validatePlatform(options.platform);
+	let platform = explicit_platform;
 	/** @type {Map<string, string>} */
 	const cssCache = new Map();
 
@@ -84,7 +88,20 @@ function create_tsrx_vue_plugin(options) {
 	let rootDir = process.cwd();
 
 	const includePattern = options.include ?? DEFAULT_TSRX_PATTERN;
-	const compile_options = { runtimeImports: options.runtimeImports };
+	const compile_options = { runtimeImports: options.runtimeImports, platform };
+
+	/** @param {import('vite').UserConfig} config */
+	function resolve_platform(config) {
+		platform = resolveBuildPlatform({
+			root: config.root ?? process.cwd(),
+			tsconfig:
+				options.tsconfig ??
+				/** @type {{ tsconfig?: string }} */ (/** @type {unknown} */ (config)).tsconfig,
+			platform: explicit_platform,
+			integration: '@tsrx/vite-plugin-vue',
+		});
+		compile_options.platform = platform;
+	}
 
 	/**
 	 * @param {string} path
@@ -120,8 +137,16 @@ function create_tsrx_vue_plugin(options) {
 		name: '@tsrx/vite-plugin-vue',
 		enforce: 'pre',
 
-		config() {
+		config(config = /** @type {import('vite').UserConfig} */ ({})) {
+			resolve_platform(config);
 			return {
+				...(platform === undefined
+					? {}
+					: {
+							define: mergePlatformDefinitions(config.define, platform, {
+								integration: 'Vite',
+							}),
+						}),
 				resolve: {
 					dedupe: ['vue', 'vue-jsx-vapor'],
 				},
@@ -138,6 +163,15 @@ function create_tsrx_vue_plugin(options) {
 						plugins: [create_tsrx_vue_scan_plugin(isVirtual, toRealPath, compile_options)],
 					},
 				},
+			};
+		},
+
+		configEnvironment(name, config = /** @type {import('vite').EnvironmentOptions} */ ({})) {
+			if (platform === undefined) return;
+			return {
+				define: mergePlatformDefinitions(config.define, platform, {
+					integration: `Vite environment ${JSON.stringify(name)}`,
+				}),
 			};
 		},
 
@@ -225,7 +259,7 @@ function create_tsrx_vue_plugin(options) {
  *
  * @param {(id: string) => boolean} isVirtual
  * @param {(id: string) => string} toRealPath
- * @param {{ runtimeImports?: RuntimeImportMode }} compile_options
+ * @param {{ runtimeImports?: RuntimeImportMode, platform?: import('@tsrx/vue').Platform }} compile_options
  * @returns {DepScanLoadPlugin}
  */
 function create_tsrx_vue_scan_plugin(isVirtual, toRealPath, compile_options) {

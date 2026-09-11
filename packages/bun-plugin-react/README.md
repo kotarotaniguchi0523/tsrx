@@ -38,6 +38,10 @@ Bun.plugin(tsrxReact());
 - `jsxImportSource`: automatic JSX runtime import source (default: `'react'`).
 - `runtimeImports`: helper import mode (`'compiler'` by default, or `'direct'` for
   standalone runtime imports).
+- `platform`: optional override/fallback for the compile-time platform. Normally
+  the plugin reads `tsrx.platform` from Bun's selected/nearest tsconfig, including
+  `extends`. An override must match tsconfig. For `Bun.build`, all three exact
+  flags are defined and conflicting definitions are rejected.
 - `emitCss`: whether to emit virtual CSS imports (default: `true`).
 - `include`, `exclude`: regex filters for source files.
 

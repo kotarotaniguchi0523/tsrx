@@ -69,6 +69,8 @@ export function TodoList({ items }: { items: Todo[] }) @{
 
 - TypeScript-compatible `.tsrx` modules that interoperate with JavaScript,
   TypeScript, and TSX code.
+- Compile-time `import.meta.env.platform` guards for shared web, iOS, and Android
+  source.
 - JSX statement containers that keep setup and rendered output in one lexical
   scope.
 - Template-native `@if`, `@for`, `@switch`, and `@try` control flow.
@@ -114,6 +116,35 @@ Zed Extension Marketplace. The
 [TSRX plugin for JetBrains IDEs](https://plugins.jetbrains.com/plugin/33991-tsrx)
 has been submitted to JetBrains Marketplace and is under review. Integrations for
 Neovim and Sublime Text are also maintained here.
+
+## Platform-specific source
+
+Select `"web"`, `"ios"`, or `"android"` in the active TypeScript project:
+
+```json
+{
+  "tsrx": {
+    "compiler": "@tsrx/react",
+    "platform": "ios"
+  }
+}
+```
+
+```ts
+tsrxReact(); // reads tsrx.platform through extends/project references
+```
+
+All three exact flags are available: `import.meta.env.platform.web`, `.ios`, and
+`.android`. An ordinary `if` whose test is exactly one flag is selected before
+TSRX semantic analysis, CSS extraction, virtual TypeScript generation, and target
+lowering. This keeps inactive platform-only code, dynamic imports, and styles out
+of diagnostics and build output. Template `@if` remains runtime control flow; use
+an ordinary `if` when inactive content must be excluded early.
+
+There is no implicit web default. A recognized flag without a platform, or any
+platform value other than the three exact strings above, is an error. An explicit
+builder `platform` option remains available as an override/fallback, but it must
+match tsconfig when both are present.
 
 ## Learn and contribute
 

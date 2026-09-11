@@ -1,9 +1,13 @@
 import type { Plugin } from 'vite';
-import type { RuntimeImportMode } from '@tsrx/vue';
+import type { Platform, RuntimeImportMode } from '@tsrx/vue';
 
 export interface TsrxVueOptions {
 	/** Direct mode requires `@tsrx/vue-runtime` as a direct production dependency. */
 	runtimeImports?: RuntimeImportMode;
+	/** Optional override; inferred from tsconfig by default and must agree when both exist. */
+	platform?: Platform;
+	/** Optional tsconfig path override, resolved from Vite's project root. */
+	tsconfig?: string;
 	/**
 	 * Regular expression matched against file paths to decide which modules
 	 * the plugin should compile as tsrx sources. Defaults to `/\.tsrx$/`.

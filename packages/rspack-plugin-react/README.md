@@ -31,6 +31,10 @@ when unset.
 - `jsxImportSource`: automatic JSX runtime import source (default: `'react'`).
 - `runtimeImports`: helper import mode (`'compiler'` by default, or `'direct'` for
   standalone runtime imports).
+- `platform`: optional override/fallback for the compile-time platform. Normally
+  the plugin reads `tsrx.platform` from the project tsconfig (including
+  `resolve.tsConfig` and `extends`). An override must match tsconfig. The plugin
+  defines all three exact flags and rejects conflicting Rspack definitions.
 
 When using `runtimeImports: 'direct'`, install the runtime as a direct production
 dependency of the package that owns the compiled modules:

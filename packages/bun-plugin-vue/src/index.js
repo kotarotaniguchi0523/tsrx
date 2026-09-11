@@ -1,9 +1,11 @@
 /** @import { BunPlugin, Target, Transpiler } from 'bun' */
-/** @import { RuntimeImportMode } from '@tsrx/vue' */
+/** @import { Platform, RuntimeImportMode } from '@tsrx/vue' */
 
 import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { compile } from '@tsrx/vue';
+import { mergePlatformDefinitions, validatePlatform } from '@tsrx/core';
+import { resolveBuildPlatform } from '@tsrx/core/config';
 import { addVaporInteropToCreateVaporApp } from '@tsrx/vue/interop';
 
 const require = createRequire(import.meta.url);
@@ -27,6 +29,7 @@ const DEFAULT_VAPOR_OPTIONS = {
  * 	exclude?: RegExp | RegExp[],
  * 	emitCss?: boolean,
  * 	runtimeImports?: RuntimeImportMode,
+ * 	platform?: Platform,
  * 	vapor?: {
  * 		macros?: boolean | object,
  * 		compiler?: { runtimeModuleName?: string },
@@ -128,9 +131,9 @@ function resolve_vapor_options(options) {
  * @returns {BunPlugin}
  */
 export function tsrxVue(options = {}) {
+	const explicit_platform = validatePlatform(options.platform);
 	const emit_css = options.emitCss ?? true;
 	const vapor_options = resolve_vapor_options(options.vapor);
-	const compile_options = { runtimeImports: options.runtimeImports };
 
 	/** @type {Map<string, string>} */
 	const css_cache = new Map();
@@ -142,6 +145,21 @@ export function tsrxVue(options = {}) {
 			// build.config is only present for Bun.build(); runtime registration
 			// via Bun.plugin(), including bun:test preloads, does not provide it.
 			const build_config = build.config ?? {};
+			const platform = resolveBuildPlatform({
+				root: build_config.root ?? process.cwd(),
+				tsconfig: typeof build_config.tsconfig === 'string' ? build_config.tsconfig : undefined,
+				platform: explicit_platform,
+				integration: '@tsrx/bun-plugin-vue',
+			});
+			const compile_options = { runtimeImports: options.runtimeImports, platform };
+			if (platform !== undefined && build.config) {
+				build.config.define = /** @type {Record<string, string>} */ (
+					mergePlatformDefinitions(build.config.define, platform, {
+						integration: 'Bun',
+						serialize: true,
+					})
+				);
+			}
 			const transpiler = create_transpiler(build_config.target);
 
 			build.onResolve({ filter: CSS_QUERY_PATTERN }, (args) => ({

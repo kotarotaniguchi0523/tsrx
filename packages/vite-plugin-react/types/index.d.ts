@@ -1,11 +1,15 @@
 import type { EnvironmentOptions, Plugin } from 'vite';
-import type { RuntimeImportMode } from '@tsrx/react';
+import type { Platform, RuntimeImportMode } from '@tsrx/react';
 import type { DepScanTransformPlugin } from '@tsrx/core/types/vite/dep-scan';
 
 export interface TsrxReactPluginOptions {
 	jsxImportSource?: string;
 	/** Direct mode requires `@tsrx/react-runtime` as a direct production dependency. */
 	runtimeImports?: RuntimeImportMode;
+	/** Optional override; inferred from tsconfig by default and must agree when both exist. */
+	platform?: Platform;
+	/** Optional tsconfig path override, resolved from Vite's project root. */
+	tsconfig?: string;
 }
 
 export interface TsrxReactTransformResult {
@@ -22,7 +26,8 @@ export interface TsrxReactPlugin extends Omit<
 		config: EnvironmentOptions,
 	) =>
 		| {
-				optimizeDeps: {
+				define?: Record<string, unknown>;
+				optimizeDeps?: {
 					extensions: string[];
 					rolldownOptions: {
 						transform: { jsx: { importSource: string } };

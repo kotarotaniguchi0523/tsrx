@@ -11,6 +11,7 @@ import {
 	getTsrxLanguagePlugin,
 	getTsrxCompilerDirForFile,
 	get_tsrx_compiler_name_for_file,
+	invalidateCompilerResolutionCaches,
 	TSRXVirtualCode,
 	_reset_for_test,
 } from '../src/language.js';
@@ -43,6 +44,20 @@ import { resolve_consumer_compiler_for_file } from '../src/consumer-compiler.js'
  */
 function create_snapshot(source) {
 	return ts.ScriptSnapshot.fromString(source);
+}
+
+/**
+ * @param {string} source
+ * @param {import('typescript').IScriptSnapshot} previous
+ * @param {import('typescript').TextChangeRange} change_range
+ */
+function create_edit_snapshot(source, previous, change_range) {
+	return {
+		getText: (/** @type {number} */ start, /** @type {number} */ end) => source.slice(start, end),
+		getLength: () => source.length,
+		getChangeRange: (/** @type {import('typescript').IScriptSnapshot} */ old_snapshot) =>
+			old_snapshot === previous ? change_range : undefined,
+	};
 }
 
 /**
@@ -233,6 +248,90 @@ function token_mapping(sourceStart, sourceLength, generatedStart, generatedLengt
 }
 
 describe('typescript-plugin language plugin integration', () => {
+	it('passes the inherited active-project platform to virtual TSX compilation', () => {
+		const { config_path, file_name } = prepare_fixture('react-only', (workspace, config) => {
+			write_config(path.join(workspace, 'base.json'), {
+				tsrx: { compiler: '@tsrx/react', platform: 'ios' },
+			});
+			write_config(config, { extends: './base.json' });
+		});
+		const plugin = create_plugin({ ts, configFileName: config_path, configHost: ts.sys });
+		const virtual_code = create_virtual_code(plugin, file_name, 'export default <div />;');
+
+		expect(virtual_code.fatalErrors).toEqual([]);
+		expect(virtual_code.generatedCode).toContain('export const platform = "ios";');
+	});
+
+	it('refreshes a virtual script after the active platform changes', () => {
+		const source = 'export default <div />;';
+		const { config_path, file_name } = prepare_fixture('react-only', (_workspace, config) => {
+			write_config(config, { tsrx: { compiler: '@tsrx/react', platform: 'ios' } });
+		});
+		const plugin = create_plugin({ ts, configFileName: config_path, configHost: ts.sys });
+		const virtual_code = create_virtual_code(plugin, file_name, source);
+		expect(virtual_code.generatedCode).toContain('export const platform = "ios";');
+
+		write_config(config_path, { tsrx: { compiler: '@tsrx/react', platform: 'android' } });
+		invalidateCompilerResolutionCaches();
+		virtual_code.update(create_snapshot(`${source}\n`));
+
+		expect(virtual_code.fatalErrors).toEqual([]);
+		expect(virtual_code.generatedCode).toContain('export const platform = "android";');
+	});
+
+	it('keeps platform typing and selection in dot-completion compilation', () => {
+		const source = 'export const active = import.meta.env.platform';
+		const initial_snapshot = create_snapshot(source);
+		/** @type {boolean[]} */
+		const required_values = [];
+		const compiler = /** @type {any} */ ({
+			compile_to_volar_mappings(
+				/** @type {string} */ code,
+				/** @type {string} */ _filename,
+				/** @type {{ platform?: string }} */ options,
+			) {
+				return {
+					code: `${code}\nexport {};\ndeclare global { interface ImportMetaEnv { readonly platform: string & { readonly ios: ${options.platform === 'ios'} } } interface ImportMeta { readonly [key: \`env\${string}\`]: ImportMetaEnv } }`,
+					mappings: [
+						{
+							sourceOffsets: [0],
+							generatedOffsets: [0],
+							lengths: [code.length],
+							generatedLengths: [code.length],
+							data: { completion: true, verification: true, customData: {} },
+						},
+					],
+					cssMappings: [],
+					scriptMappings: [],
+					errors: [],
+					sourceAst: null,
+				};
+			},
+		});
+		const virtual_code = new TSRXVirtualCode(
+			'/virtual/App.tsrx',
+			initial_snapshot,
+			compiler,
+			(required) => {
+				required_values.push(required);
+				return 'ios';
+			},
+		);
+		const with_dot = `${source}.`;
+		virtual_code.update(
+			create_edit_snapshot(with_dot, initial_snapshot, {
+				span: { start: source.length, length: 0 },
+				newLength: 1,
+			}),
+		);
+
+		expect(virtual_code.fatalErrors).toEqual([]);
+		expect(virtual_code.isDotCompletionMode).toBe(true);
+		expect(virtual_code.generatedCode).toContain('import.meta.env.platform.');
+		expect(virtual_code.generatedCode).toContain('readonly ios: true');
+		expect(required_values).toEqual([false, false]);
+	});
+
 	beforeEach(() => {
 		_reset_for_test();
 	});

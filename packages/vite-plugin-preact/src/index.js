@@ -1,6 +1,6 @@
 /** @import { Plugin } from 'vite' */
 /** @import { DepScanTransformPlugin } from '@tsrx/core/types/vite/dep-scan' */
-/** @import { RuntimeImportMode } from '@tsrx/preact' */
+/** @import { Platform, RuntimeImportMode } from '@tsrx/preact' */
 
 /**
  * @typedef {{ code: string, map: unknown }} TsrxPreactTransformResult
@@ -35,6 +35,8 @@
 
 import { transformWithOxc } from 'vite';
 import { compile } from '@tsrx/preact';
+import { mergePlatformDefinitions, validatePlatform } from '@tsrx/core';
+import { resolveBuildPlatform } from '@tsrx/core/config';
 import { createDepScanTransformPlugin } from '@tsrx/core/vite/dep-scan';
 
 const TSRX_EXTENSION_PATTERN = /\.tsrx$/;
@@ -50,15 +52,33 @@ const CSS_QUERY = '?tsrx-css&lang.css';
  *   jsxImportSource?: string,
  *   suspenseSource?: string,
  *   runtimeImports?: RuntimeImportMode,
+ *   platform?: Platform,
+ *   tsconfig?: string,
  * }} [options]
  * @returns {TsrxPreactPlugin}
  */
 export function tsrxPreact(options = {}) {
+	const explicit_platform = validatePlatform(options.platform);
+	let platform = explicit_platform;
 	const jsxImportSource = options.jsxImportSource ?? 'preact';
 	const compile_options = {
 		suspenseSource: options.suspenseSource,
 		runtimeImports: options.runtimeImports,
+		platform,
 	};
+
+	/** @param {import('vite').UserConfig} config */
+	function resolve_platform(config) {
+		platform = resolveBuildPlatform({
+			root: config.root ?? process.cwd(),
+			tsconfig:
+				options.tsconfig ??
+				/** @type {{ tsconfig?: string }} */ (/** @type {unknown} */ (config)).tsconfig,
+			platform: explicit_platform,
+			integration: '@tsrx/vite-plugin-preact',
+		});
+		compile_options.platform = platform;
+	}
 
 	/** @type {Map<string, string>} */
 	const css_cache = new Map();
@@ -81,8 +101,16 @@ export function tsrxPreact(options = {}) {
 		name: '@tsrx/vite-plugin-preact',
 		enforce: 'pre',
 
-		config() {
+		config(config = /** @type {import('vite').UserConfig} */ ({})) {
+			resolve_platform(config);
 			return {
+				...(platform === undefined
+					? {}
+					: {
+							define: mergePlatformDefinitions(config.define, platform, {
+								integration: 'Vite',
+							}),
+						}),
 				optimizeDeps: {
 					// The scanner externalizes anything that is not a known JS
 					// type unless its extension is listed here, so without this
@@ -98,6 +126,15 @@ export function tsrxPreact(options = {}) {
 						plugins: [create_dep_scan_plugin(jsxImportSource, compile_options)],
 					},
 				},
+			};
+		},
+
+		configEnvironment(name, config = /** @type {import('vite').EnvironmentOptions} */ ({})) {
+			if (platform === undefined) return;
+			return {
+				define: mergePlatformDefinitions(config.define, platform, {
+					integration: `Vite environment ${JSON.stringify(name)}`,
+				}),
 			};
 		},
 
@@ -163,7 +200,7 @@ export function tsrxPreact(options = {}) {
 
 /**
  * @param {string} jsxImportSource
- * @param {{ suspenseSource?: string, runtimeImports?: RuntimeImportMode }} compile_options
+ * @param {{ suspenseSource?: string, runtimeImports?: RuntimeImportMode, platform?: Platform }} compile_options
  * @returns {DepScanTransformPlugin}
  */
 function create_dep_scan_plugin(jsxImportSource, compile_options) {

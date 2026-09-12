@@ -203,12 +203,11 @@ their TSRX compilation and install the target compiler package.
 
 ### Hono setup
 
-Requires Hono `^4.13.7` (including the JSX boundary escaping fixes). The Vite
-integration requires Vite `^8.0.0` for its Oxc transform and dependency scanner.
+Requires Hono `^4.13.7`. The Vite integration requires Vite `^8.0.0`.
 
-`@tsrx/hono` has two runtime modes. The server compiler emits `hono/jsx` output;
-the DOM compiler emits `hono/jsx/dom` output and is selected by the Vite or Bun
-plugin with `mode: 'dom'`.
+`@tsrx/hono` provides two compiler modes: the server target emits `hono/jsx`,
+and the DOM target emits `hono/jsx/dom`. Select the mode explicitly in the Vite
+or Bun plugin. A single plugin instance and build use one Hono mode.
 
 ```ts
 // vite.config.ts
@@ -221,41 +220,59 @@ export default defineConfig({
 ```
 
 For browser builds, use `tsrxHono({ mode: 'dom' })`. Hono DOM components are
-synchronous; represent asynchronous work with Hono's `use(promise)` inside
-`<Suspense>`, rather than returning a Promise from an async component. Hono's
-ErrorBoundary adapter uses `fallbackRender` and does not provide a reset callback.
+synchronous; use Hono's async and Suspense APIs for asynchronous work. The DOM
+validator reports explicit async components when they can be identified safely
+in the same module, but does not infer arbitrary Promise returns.
 
-The generated server JSX can be used with Hono's normal `c.html()` response, or
-with `c.render()` and `jsxRenderer` for layouts and `useRequestContext()`. For
-streaming Suspense, use Hono's `hono/jsx/streaming` APIs or the renderer's
-`stream` option. `StreamingContext` remains an application-level Hono context
-for passing script nonces; TSRX does not replace or manage it.
+For an application that has both server and browser entrypoints, keep one Vite
+config and run two builds. Map Vite's explicit `client` mode to the DOM target:
 
-The DOM target uses Hono's normal `render()`/`createRoot()` APIs. Hooks and
-Context remain Hono APIs: the documented pattern may import hooks from
-`hono/jsx` while the JSX runtime is selected with `hono/jsx/dom`. Hono's
-`hono/css`/`Style`, custom JSX elements, and module-augmented intrinsic element
-types are also used directly; TSRX does not provide substitutes for them.
+```ts
+// vite.config.ts
+import { defineConfig } from 'vite';
+import tsrxHono from '@tsrx/vite-plugin-hono';
 
-This integration targets the documented JSX and Client Components boundaries. It
-does not claim that Hono's server and DOM runtimes have identical hook or async
-semantics.
+export default defineConfig(({ mode }) => ({
+	plugins: [
+		tsrxHono({
+			mode: mode === 'client' ? 'dom' : 'server',
+		}),
+	],
+}));
+```
 
-For editor diagnostics, set `tsrx.compiler` to `@tsrx/hono/dom` in `tsconfig.json`
-and `compilerOptions.jsxImportSource` to `hono/jsx/dom` for DOM projects. For MCP
-compilation, select `target: 'hono'` and `mode: 'client'` for DOM output;
-`mode: 'server'` or omitting `mode` selects server output.
+```bash
+vite build --mode client  # hono/jsx/dom
+vite build                # hono/jsx
+```
 
-The Bun integration has the same `server`/`dom` modes:
+Use separate entrypoints and output directories as needed. Do not use Vite or
+Bun `include`/`exclude` filters to route server and DOM files within one build.
+A shared `.tsrx` module is compiled separately in each entrypoint graph and must
+be valid for both runtimes.
+
+For editor diagnostics, set `tsrx.compiler: "@tsrx/hono/dom"` explicitly for
+Hono DOM files. The TypeScript plugin does not infer the DOM target from
+`jsxImportSource`. For MCP compilation, select `target: 'hono'` and
+`mode: 'client'` for DOM output; `mode: 'server'` or omitting `mode` selects
+server output.
+
+The Bun integration has the same `server`/`dom` modes. Run two `Bun.build()` calls
+when a project has both server and browser entrypoints:
 
 ```ts
 import tsrxHono from '@tsrx/bun-plugin-hono';
 
-await Bun.build({
-	entrypoints: ['./src/App.tsrx'],
-	outdir: './dist',
-	plugins: [tsrxHono({ mode: 'server' })],
-});
+for (const target of [
+	{ mode: 'dom', entrypoint: './src/client-entry.tsrx', outdir: './dist/client' },
+	{ mode: 'server', entrypoint: './src/server-entry.tsrx', outdir: './dist/server' },
+] as const) {
+	await Bun.build({
+		entrypoints: [target.entrypoint],
+		outdir: target.outdir,
+		plugins: [tsrxHono({ mode: target.mode })],
+	});
+}
 ```
 
 ### Octane setup

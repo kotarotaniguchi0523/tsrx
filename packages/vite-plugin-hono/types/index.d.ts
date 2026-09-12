@@ -13,10 +13,5 @@ export interface TsrxHonoPluginOptions {
 	runtimeImports?: RuntimeImportMode;
 }
 
-export interface TsrxHonoTransformResult {
-	code: string;
-	map: unknown;
-}
-
 export function tsrxHono(options?: TsrxHonoPluginOptions): Plugin;
 export default tsrxHono;

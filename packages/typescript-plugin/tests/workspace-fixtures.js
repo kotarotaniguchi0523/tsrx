@@ -345,6 +345,12 @@ export const WORKSPACE_CONFIGS = {
 		'consumer-tsrx-compiler',
 		'declared',
 	),
+	'hono-dom-explicit': declared_workspace_config(
+		'@tsrx/fixture-hono-dom-explicit-project',
+		'@tsrx/hono/dom',
+		'hono-dom',
+		{ package_json: { devDependencies: { '@tsrx/hono': 'workspace:*' } } },
+	),
 	'declared-scoped': declared_workspace_config(
 		'@tsrx/fixture-declared-scoped-project',
 		'@consumer/tsrx-compiler',
@@ -457,6 +463,9 @@ function write_compiler_stub(workspace_dir, compiler_name) {
 		main: './src/index.js',
 	});
 	fs.writeFileSync(path.join(compiler_dir, 'index.js'), COMPILER_STUBS[compiler_name]);
+	if (compiler_name === 'hono') {
+		fs.writeFileSync(path.join(compiler_dir, 'dom.js'), COMPILER_STUBS[compiler_name]);
+	}
 }
 
 /** @param {string} workspace_dir @param {string} specifier @param {string} marker @param {string} [directory] @param {string[]} [entry_parts] @param {boolean} [export_subpath] */

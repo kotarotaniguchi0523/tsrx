@@ -10,7 +10,7 @@ describe('Hono MCP runtime selection', () => {
 			cwd,
 			target: 'hono',
 			mode: 'client',
-			code: 'export async function App() { return <div />; }',
+			code: 'export async function App() { return <div />; } <App />',
 		});
 		expect(result.compilerPackage).toBe('@tsrx/hono/dom');
 		expect(result.ok).toBe(false);

@@ -60,6 +60,10 @@ async function load_tsrx(hooks, file_path) {
 }
 
 describe('@tsrx/bun-plugin-hono', () => {
+	it('rejects an invalid mode instead of silently selecting server', () => {
+		expect(() => tsrxHono({ mode: /** @type {any} */ ('dmo') })).toThrow(/invalid mode/);
+	});
+
 	it('compiles server files and selects hono/jsx', async () => {
 		const transpiler = install_transpiler_stub();
 		const dir = await mkdtemp(path.join(os.tmpdir(), 'tsrx-bun-plugin-hono-'));

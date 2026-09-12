@@ -2,10 +2,19 @@
 /** @import * as ESTreeJSX from 'estree-jsx' */
 /** @import { JsxPlatform, JsxTransformContext, TSRXAnalysisResult } from '@tsrx/core/types' */
 
-import { builders as b, createJsxTransform, error } from '@tsrx/core';
+import {
+	builders as b,
+	createJsxTransform,
+	error,
+	findFirstTopLevelAwait,
+	findFirstTopLevelAwaitInTsrxFunctionBody,
+	is_component_like_element as isComponentLikeElement,
+	isFunctionNode,
+} from '@tsrx/core';
 
-const HonoServerSource = 'hono/jsx';
-const HonoDomSource = 'hono/jsx/dom';
+const HONO_SERVER_SOURCE = 'hono/jsx';
+const HONO_DOM_SOURCE = 'hono/jsx/dom';
+const AST_METADATA_KEYS = new Set(['loc', 'start', 'end', 'metadata']);
 
 /**
  * The Hono JSX runtimes accept authored `class` attributes and expose their
@@ -19,7 +28,7 @@ const HonoDomSource = 'hono/jsx/dom';
  */
 function create_hono_platform(mode) {
 	const is_dom = mode === 'dom';
-	const jsx_source = is_dom ? HonoDomSource : HonoServerSource;
+	const jsx_source = is_dom ? HONO_DOM_SOURCE : HONO_SERVER_SOURCE;
 	/** @type {NonNullable<JsxPlatform['hooks']>} */
 	const hooks = {
 		createErrorBoundary(try_content, _raw_try_content, fallback_fn, ctx, node) {
@@ -30,9 +39,8 @@ function create_hono_platform(mode) {
 					// Hono DOM keys hook state by the runtime component function. A
 					// helper recreated inside its parent would lose state on updates.
 					moduleScopedHookComponents: true,
-					// Hono DOM JSX nodes carry mutable reconciliation state (`e`,
-					// `vC`, and hook stash) on the node object itself. Reusing any
-					// module-scoped node across mounts is therefore unsafe, not only
+					// Hono DOM JSX nodes carry mutable reconciliation and hook state.
+					// Reusing any module-scoped node across mounts is unsafe, not only
 					// reusing composite nodes.
 					canHoistStaticNode() {
 						return false;
@@ -71,7 +79,6 @@ function create_hono_platform(mode) {
 		},
 		jsx: {
 			rewriteClassAttr: false,
-			classAttrName: 'class',
 			multiRefStrategy: 'merge-refs',
 		},
 		validation: {
@@ -130,21 +137,23 @@ export const hono_server_transform = createJsxTransform(create_hono_platform('se
 export const hono_dom_transform = createJsxTransform(create_hono_platform('dom'));
 
 /**
- * Hono DOM renders components synchronously. Its renderer does not unwrap a
- * Promise returned by an async component, even when the component itself does
- * not contain an `await`; async work must be represented with `use(promise)`
- * inside `<Suspense>` instead.
+ * Hono DOM renders components synchronously. This validator deliberately
+ * diagnoses only explicit `async` component functions that can be resolved
+ * from a component position in the same module. Promise return types require
+ * type information or inter-module analysis and are outside this pass.
  *
  * @param {AST.Program} ast
  * @param {string} filename
- * @param {{ source?: string, errors?: import('@tsrx/core/types').CompileError[], comments: AST.CommentWithLocation[], analysis: TSRXAnalysisResult }} context
+ * @param {{ source: string, errors?: import('@tsrx/core/types').CompileError[], comments: AST.CommentWithLocation[], collect: boolean, analysis: TSRXAnalysisResult }} context
  */
 export function validate_hono_dom_components(ast, filename, context) {
-	// Async components are the only unsupported shape. Avoid a second full AST
-	// walk for the common case where the source cannot contain an async function.
-	if (context.source && !context.source.includes('async')) return;
+	if (context.source && !/\basync\b/.test(context.source)) return;
 
-	const component = find_async_hono_dom_component(ast, context.analysis);
+	const component = find_hono_dom_async_component(
+		ast,
+		context.analysis,
+		context.collect ? (node) => find_hono_component_await(node) === null : undefined,
+	);
 	if (!component) return;
 
 	error(
@@ -157,354 +166,258 @@ export function validate_hono_dom_components(ast, filename, context) {
 }
 
 /**
- * Find the first async function that can be used as a Hono DOM component.
- * Looking for JSX anywhere below an async function is not sufficient: event
- * handlers and other helpers may legitimately create JSX without returning it
- * to Hono's renderer. Component positions and exported conventional uppercase
- * bindings provide the boundary that the source AST can establish.
+ * Use the same await boundary as the core transform for both ordinary
+ * functions and TSRX statement containers.
+ *
+ * @param {AST.Function} node
+ * @returns {AST.Node | null}
+ */
+function find_hono_component_await(node) {
+	if (node.body?.type === 'JSXCodeBlock') {
+		return findFirstTopLevelAwaitInTsrxFunctionBody([
+			...(node.body.body || []),
+			...(node.body.render ? [node.body.render] : []),
+		]);
+	}
+
+	return findFirstTopLevelAwait(node.body, false);
+}
+
+/**
+ * Resolve only static same-module component references. Mutable bindings are
+ * intentionally ignored: resolving their current value would require source
+ * order and control-flow analysis. This keeps the validator conservative and
+ * prevents a later assignment from changing the meaning of an earlier JSX use.
  *
  * @param {AST.Program} ast
  * @param {TSRXAnalysisResult} analysis
+ * @param {(node: AST.Function) => boolean} [is_custom_diagnostic_candidate]
  * @returns {AST.Function | null}
  */
-function find_async_hono_dom_component(ast, analysis) {
-	/** @type {Array<{ node: AST.Function, binding: import('@tsrx/core/types').Binding | null, name: string | null, defaultExport: boolean, exported: boolean }>} */
-	const functions = [];
-	const exported_names = get_exported_hono_dom_component_names(ast);
-	const default_export_names = get_default_hono_dom_component_names(ast);
-	/** @type {Map<import('@tsrx/core/types').Binding, AST.Function>} */
-	const candidate_bindings = new Map();
-	/** @type {Map<AST.Function, AST.Function>} */
-	const candidate_nodes = new Map();
+function find_hono_dom_async_component(ast, analysis, is_custom_diagnostic_candidate) {
+	/** @type {Map<AST.Node, import('@tsrx/core/types').ScopeInterface | null>} */
+	const scopes = new Map();
+	/** @type {Array<{ node: AST.Node, scope: import('@tsrx/core/types').ScopeInterface | null }>} */
+	const jsx_references = [];
+	/** @type {Map<import('@tsrx/core/types').Binding, string[]>} */
+	const destructured_paths = new Map();
 
-	collect_async_hono_dom_components(
-		ast,
-		null,
-		analysis.scopes.get(ast),
-		analysis.scopes,
-		functions,
-		candidate_bindings,
-		candidate_nodes,
-		exported_names,
-		default_export_names,
-	);
+	/** @param {AST.Node | null | undefined} node @param {import('@tsrx/core/types').ScopeInterface | null} scope */
+	function walk(node, scope) {
+		if (!node || typeof node !== 'object') return;
+		scope = analysis.scopes.get(node) ?? scope;
+		scopes.set(node, scope);
 
-	const component = functions.find(
-		({ node, name, defaultExport, exported }) =>
-			defaultExport ||
-			(name && default_export_names.has(name)) ||
-			(exported && name && is_uppercase_name(name)) ||
-			candidate_nodes.has(node),
-	);
-	if (component && (component.defaultExport || component.exported || component.name)) {
-		if (
-			component.defaultExport ||
-			(component.name &&
-				(default_export_names.has(component.name) ||
-					(component.exported && is_uppercase_name(component.name))))
-		) {
-			return component.node;
+		if (node.type === 'JSXElement') {
+			const name = node.openingElement.name;
+			const reference =
+				name.type === 'JSXExpressionContainer' && name.expression.type !== 'JSXEmptyExpression'
+					? name.expression
+					: name;
+			if (name.type !== 'JSXIdentifier' || isComponentLikeElement(node)) {
+				jsx_references.push({ node: reference, scope });
+			}
 		}
+		if (node.type === 'VariableDeclarator' && node.init) {
+			collect_hono_destructured_paths(node.id, scope, destructured_paths);
+		}
+
+		for_each_hono_child(node, (child) => walk(child, scope));
 	}
 
-	return find_referenced_async_hono_dom_component(
-		ast,
-		analysis.scopes.get(ast),
-		analysis.scopes,
-		candidate_bindings,
-	);
-}
+	/**
+	 * @param {AST.Node | null | undefined} node
+	 * @param {string[]} property_path
+	 * @param {Set<AST.Node>} seen
+	 * @returns {AST.Function | null}
+	 */
+	function resolve_async_component(node, property_path, seen) {
+		if (!node || seen.has(node)) return null;
+		const next_seen = new Set(seen).add(node);
+		const expression = unwrap_hono_transparent_expression(node);
+		if (expression !== node) return resolve_async_component(expression, property_path, next_seen);
 
-/**
- * @param {AST.Program} ast
- * @returns {Set<string>}
- */
-function get_exported_hono_dom_component_names(ast) {
-	const names = new Set();
-
-	for (const statement of ast.body) {
-		if (statement.type === 'ExportDefaultDeclaration') {
-			const declaration = statement.declaration;
-			if (declaration?.type === 'Identifier') names.add(declaration.name);
-			continue;
+		if (isFunctionNode(node)) {
+			if (property_path.length || !node.async) return null;
+			if (is_custom_diagnostic_candidate && !is_custom_diagnostic_candidate(node)) {
+				return null;
+			}
+			return node;
 		}
-		if (statement.type !== 'ExportNamedDeclaration') continue;
 
-		const declaration = statement.declaration;
-		if (declaration?.type === 'FunctionDeclaration' && declaration.id?.type === 'Identifier') {
-			names.add(declaration.id.name);
-		} else if (declaration?.type === 'VariableDeclaration') {
-			for (const declarator of declaration.declarations) {
-				const name = get_static_name(declarator.id);
-				if (name) names.add(name);
+		if (node.type === 'ObjectExpression' && property_path.length) {
+			for (const property of node.properties) {
+				if (property.type !== 'Property' || property.kind !== 'init') continue;
+				if (
+					property.computed &&
+					(property.key.type !== 'Literal' || typeof property.key.value !== 'string')
+				) {
+					continue;
+				}
+				if (get_hono_static_name(property.key, true) !== property_path[0]) continue;
+				const found = resolve_async_component(property.value, property_path.slice(1), next_seen);
+				if (found) return found;
 			}
 		}
 
-		for (const specifier of statement.specifiers ?? []) {
-			const name = get_static_name(specifier.local);
-			if (name) names.add(name);
-		}
-	}
+		const reference = resolve_hono_reference(node, scopes.get(node) ?? analysis.scope);
+		if (!reference || reference.binding.updated || !reference.binding.initial) return null;
 
-	return names;
-}
-
-/**
- * @param {AST.Program} ast
- * @returns {Set<string>}
- */
-function get_default_hono_dom_component_names(ast) {
-	const names = new Set();
-
-	for (const statement of ast.body) {
-		if (statement.type !== 'ExportDefaultDeclaration') continue;
-		const declaration = statement.declaration;
-		if (declaration?.type === 'Identifier') names.add(declaration.name);
-		if (
-			(declaration?.type === 'FunctionDeclaration' || declaration?.type === 'FunctionExpression') &&
-			declaration.id?.type === 'Identifier'
-		) {
-			names.add(declaration.id.name);
-		}
-	}
-
-	return names;
-}
-
-const AST_METADATA_KEYS = new Set(['loc', 'start', 'end', 'metadata']);
-
-/**
- * @param {AST.Node | AST.Node[] | null | undefined} node
- * @param {AST.Node | null} parent
- * @param {import('@tsrx/core/types').ScopeInterface | null | undefined} scope
- * @param {Map<AST.Node, import('@tsrx/core/types').ScopeInterface>} scopes
- * @param {Array<{ node: AST.Function, binding: import('@tsrx/core/types').Binding | null, name: string | null, defaultExport: boolean, exported: boolean }>} functions
- * @param {Map<import('@tsrx/core/types').Binding, AST.Function>} candidate_bindings
- * @param {Map<AST.Function, AST.Function>} candidate_nodes
- * @param {Set<string>} exported_names
- * @param {Set<string>} default_export_names
- */
-function collect_async_hono_dom_components(
-	node,
-	parent,
-	scope,
-	scopes,
-	functions,
-	candidate_bindings,
-	candidate_nodes,
-	exported_names,
-	default_export_names,
-) {
-	if (!node) return;
-	if (Array.isArray(node)) {
-		for (const child of node) {
-			collect_async_hono_dom_components(
-				child,
-				parent,
-				scope,
-				scopes,
-				functions,
-				candidate_bindings,
-				candidate_nodes,
-				exported_names,
-				default_export_names,
-			);
-		}
-		return;
-	}
-	if (typeof node !== 'object') return;
-
-	if (is_function_node(node)) {
-		if (node.async) {
-			const binding = find_function_binding(node, scope);
-			const name = binding?.node?.name ?? null;
-			const default_export = parent?.type === 'ExportDefaultDeclaration';
-			const candidate = {
-				node,
-				binding,
-				name,
-				defaultExport: default_export,
-				exported: Boolean(name && exported_names.has(name)),
-			};
-			functions.push({
-				...candidate,
-			});
-			if (binding) candidate_bindings.set(binding, node);
-			if (
-				default_export ||
-				(name &&
-					(default_export_names.has(name) || (candidate.exported && is_uppercase_name(name))))
-			) {
-				candidate_nodes.set(node, node);
-			}
-		}
-	}
-
-	for (const key of Object.keys(node)) {
-		if (AST_METADATA_KEYS.has(key)) continue;
-		const value = /** @type {unknown} */ (/** @type {Record<string, unknown>} */ (node)[key]);
-		if (Array.isArray(value)) {
-			for (const child of value) {
-				collect_async_hono_dom_components(
-					/** @type {AST.Node | null} */ (child),
-					node,
-					scopes.get(node) ?? scope,
-					scopes,
-					functions,
-					candidate_bindings,
-					candidate_nodes,
-					exported_names,
-					default_export_names,
-				);
-			}
-		} else {
-			collect_async_hono_dom_components(
-				/** @type {AST.Node | null} */ (value),
-				node,
-				scopes.get(node) ?? scope,
-				scopes,
-				functions,
-				candidate_bindings,
-				candidate_nodes,
-				exported_names,
-				default_export_names,
-			);
-		}
-	}
-}
-
-/**
- * @param {AST.Function} node
- * @param {import('@tsrx/core/types').ScopeInterface | null | undefined} scope
- * @returns {import('@tsrx/core/types').Binding | null}
- */
-
-function find_function_binding(node, scope) {
-	for (let current = scope; current; current = current.parent) {
-		for (const binding of current.declarations.values()) {
-			if (binding.initial === node) return binding;
-		}
-	}
-	return null;
-}
-
-/**
- * @param {AST.Node | null | undefined} node
- * @returns {string | null}
- */
-function get_static_name(node) {
-	if (node?.type === 'Identifier') return node.name;
-	return null;
-}
-
-/**
- * @param {AST.Node | AST.Node[] | null | undefined} node
- * @param {import('@tsrx/core/types').ScopeInterface | null | undefined} scope
- * @param {Map<AST.Node, import('@tsrx/core/types').ScopeInterface>} scopes
- * @param {Map<import('@tsrx/core/types').Binding, AST.Function>} candidate_bindings
- * @returns {AST.Function | null}
- */
-
-function find_referenced_async_hono_dom_component(node, scope, scopes, candidate_bindings) {
-	if (!node) return null;
-	if (Array.isArray(node)) {
-		for (const child of node) {
-			const component = find_referenced_async_hono_dom_component(
-				child,
-				scope,
-				scopes,
-				candidate_bindings,
-			);
-			if (component) return component;
-		}
-		return null;
-	}
-	if (typeof node !== 'object') return null;
-
-	const node_scope = scopes.get(node) ?? scope;
-	let name = null;
-	if (node.type === 'JSXElement') {
-		name = get_jsx_component_reference_name(node.openingElement?.name);
-	} else if (node.type === 'CallExpression') {
-		name = get_jsx_factory_component_reference(node);
-	}
-	if (name && is_uppercase_name(name)) {
-		const binding = node_scope?.get(name);
-		const component = binding && candidate_bindings.get(binding);
-		if (component) return component;
-	}
-
-	for (const key of Object.keys(node)) {
-		if (AST_METADATA_KEYS.has(key)) continue;
-		const value = /** @type {unknown} */ (/** @type {Record<string, unknown>} */ (node)[key]);
-		const component = find_referenced_async_hono_dom_component(
-			/** @type {AST.Node | AST.Node[] | null} */ (value),
-			node_scope,
-			scopes,
-			candidate_bindings,
+		// Combine destructuring and member segments in root-to-leaf order.
+		return resolve_async_component(
+			reference.binding.initial,
+			[...(destructured_paths.get(reference.binding) ?? []), ...reference.path, ...property_path],
+			next_seen,
 		);
-		if (component) return component;
+	}
+
+	walk(ast, analysis.scope);
+	for (const reference of jsx_references) {
+		const found = resolve_async_component(reference.node, [], new Set());
+		if (found) return found;
 	}
 	return null;
-}
-
-/**
- * @param {AST.Node | null | undefined} node
- * @returns {string | null}
- */
-function get_jsx_component_reference_name(node) {
-	if (!node) return null;
-	if (node.type === 'JSXIdentifier') return node.name;
-	if (node.type === 'JSXMemberExpression') {
-		return get_jsx_component_reference_name(node.object);
-	}
-	return null;
-}
-
-/**
- * @param {AST.CallExpression} node
- * @returns {string | null}
- */
-function get_jsx_factory_component_reference(node) {
-	const callee = node.callee;
-	const callee_name =
-		callee.type === 'Identifier'
-			? callee.name
-			: callee.type === 'MemberExpression' &&
-				  !callee.computed &&
-				  callee.property.type === 'Identifier'
-				? callee.property.name
-				: null;
-	if (callee_name !== 'jsx' && callee_name !== 'jsxs' && callee_name !== 'jsxDEV') return null;
-
-	const first_argument = node.arguments[0];
-	if (first_argument?.type === 'Identifier') return first_argument.name;
-	if (
-		first_argument?.type === 'MemberExpression' &&
-		!first_argument.computed &&
-		first_argument.property.type === 'Identifier'
-	) {
-		return first_argument.object.type === 'Identifier' ? first_argument.object.name : null;
-	}
-	return null;
-}
-
-/**
- * @param {string} name
- * @returns {boolean}
- */
-function is_uppercase_name(name) {
-	return /^[A-Z]/.test(name);
 }
 
 /**
  * @param {AST.Node} node
- * @returns {node is AST.Function}
+ * @param {(child: AST.Node) => void} visit
  */
-function is_function_node(node) {
+function for_each_hono_child(node, visit) {
+	for (const key of Object.keys(node)) {
+		if (AST_METADATA_KEYS.has(key)) continue;
+		const value = /** @type {unknown} */ (/** @type {Record<string, unknown>} */ (node)[key]);
+		for (const child of Array.isArray(value) ? value : [value]) {
+			if (child && typeof child === 'object' && 'type' in child) {
+				visit(/** @type {AST.Node} */ (child));
+			}
+		}
+	}
+}
+
+/**
+ * @param {AST.Node | null | undefined} node
+ * @returns {AST.Node | null}
+ */
+function unwrap_hono_transparent_expression(node) {
+	let expression = node ?? null;
+	while (expression) {
+		const child = /** @type {{ expression?: AST.Node }} */ (expression).expression;
+		if (!child || !is_hono_transparent_expression_wrapper(expression, child)) return expression;
+		expression = child;
+	}
+	return null;
+}
+
+/**
+ * Hono's local resolver only needs wrappers that preserve an expression value.
+ * Keep this boundary local because the core predicate is intentionally not a
+ * public target API.
+ *
+ * @param {AST.Node} parent
+ * @param {AST.Node} child
+ * @returns {boolean}
+ */
+function is_hono_transparent_expression_wrapper(parent, child) {
 	return (
-		node.type === 'FunctionDeclaration' ||
-		node.type === 'FunctionExpression' ||
-		node.type === 'ArrowFunctionExpression'
+		(parent.type === 'ParenthesizedExpression' ||
+			parent.type === 'TSAsExpression' ||
+			parent.type === 'TSSatisfiesExpression' ||
+			parent.type === 'TSNonNullExpression' ||
+			parent.type === 'TSInstantiationExpression' ||
+			parent.type === 'TSTypeAssertion' ||
+			parent.type === 'ChainExpression') &&
+		/** @type {{ expression?: AST.Node }} */ (parent).expression === child
 	);
+}
+
+/**
+ * Resolve an identifier or static member without evaluating computed
+ * expressions. `obj['App']` is statically known; `obj[key]` is not.
+ *
+ * @param {AST.Node | null | undefined} node
+ * @param {import('@tsrx/core/types').ScopeInterface | null} scope
+ * @returns {{ binding: import('@tsrx/core/types').Binding, path: string[] } | null}
+ */
+function resolve_hono_reference(node, scope) {
+	if (!node || !scope) return null;
+	const expression = unwrap_hono_transparent_expression(node);
+	if (!expression) return null;
+	if (expression.type === 'Identifier' || expression.type === 'JSXIdentifier') {
+		const binding = scope.get(expression.name);
+		return binding ? { binding, path: [] } : null;
+	}
+	if (expression.type === 'MemberExpression' || expression.type === 'JSXMemberExpression') {
+		const base = resolve_hono_reference(expression.object, scope);
+		const property_name =
+			expression.type === 'MemberExpression'
+				? get_hono_member_name(expression)
+				: get_hono_static_name(expression.property);
+		return base && property_name !== null
+			? { binding: base.binding, path: [...base.path, property_name] }
+			: null;
+	}
+	return null;
+}
+
+/**
+ * @param {AST.MemberExpression} node
+ * @returns {string | null}
+ */
+function get_hono_member_name(node) {
+	if (node.computed) {
+		return node.property.type === 'Literal' && typeof node.property.value === 'string'
+			? node.property.value
+			: null;
+	}
+	return get_hono_static_name(node.property);
+}
+
+/**
+ * @param {AST.Node | null | undefined} node
+ * @param {import('@tsrx/core/types').ScopeInterface | null} scope
+ * @param {Map<import('@tsrx/core/types').Binding, string[]>} paths
+ * @param {string[]} [path]
+ */
+function collect_hono_destructured_paths(node, scope, paths, path = []) {
+	if (!node || !scope) return;
+	const expression = unwrap_hono_transparent_expression(node);
+	if (!expression) return;
+	if (expression.type === 'Identifier') {
+		if (path.length) {
+			const binding = scope.get(expression.name);
+			if (binding) paths.set(binding, path);
+		}
+		return;
+	}
+	if (expression.type === 'AssignmentPattern') {
+		collect_hono_destructured_paths(expression.left, scope, paths, path);
+		return;
+	}
+	if (expression.type !== 'ObjectPattern') return;
+	for (const property of expression.properties) {
+		if (property.type === 'RestElement') continue;
+		if (
+			property.computed &&
+			(property.key.type !== 'Literal' || typeof property.key.value !== 'string')
+		) {
+			continue;
+		}
+		const property_name = get_hono_static_name(property.key, true);
+		if (property_name !== null) {
+			collect_hono_destructured_paths(property.value, scope, paths, [...path, property_name]);
+		}
+	}
+}
+
+/**
+ * @param {AST.Node | null | undefined} node
+ * @param {boolean} [allow_literal]
+ * @returns {string | null}
+ */
+function get_hono_static_name(node, allow_literal = false) {
+	if (node?.type === 'Identifier' || node?.type === 'JSXIdentifier') return node.name;
+	if (allow_literal && node?.type === 'Literal' && typeof node.value === 'string')
+		return node.value;
+	return null;
 }

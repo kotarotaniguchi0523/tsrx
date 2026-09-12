@@ -145,11 +145,11 @@ Rspack's `resolve.tsConfig`, Bun's `build.tsconfig`, or Next's
 root.
 
 Vite, Rspack, Bun, and the available React Turbopack integration support the
-option. The same option is available for every React, Preact, Solid, and Vue
-integration that exists. An explicit builder `platform` remains available as an
-override/fallback, but it must agree with tsconfig when both exist. Vite, Rspack,
-and Bun reject conflicting user-provided definitions. Omitting the platform
-remains valid until a recognized flag is used; using a flag without
+option. The same option is available for every React, Preact, Solid, Vue, and
+Hono integration that exists. An explicit builder `platform` remains available
+as an override/fallback, but it must agree with tsconfig when both exist. Vite,
+Rspack, and Bun reject conflicting user-provided definitions. Omitting the
+platform remains valid until a recognized flag is used; using a flag without
 configuration, or supplying any other value, is an actionable error.
 
 ### Runtime helper imports
@@ -250,6 +250,12 @@ Use separate entrypoints and output directories as needed. Do not use Vite or
 Bun `include`/`exclude` filters to route server and DOM files within one build.
 A shared `.tsrx` module is compiled separately in each entrypoint graph and must
 be valid for both runtimes.
+
+The Hono `server`/`dom` mode is independent of the shared compile-time
+`tsrx.platform` setting. Vite and Bun read `tsrx.platform` from the active
+tsconfig and specialize `import.meta.env.platform.web`, `.ios`, and `.android`;
+an explicit plugin `platform` option is only an override and must agree with
+tsconfig when both are set.
 
 For editor diagnostics, set `tsrx.compiler: "@tsrx/hono/dom"` explicitly for
 Hono DOM files. The TypeScript plugin does not infer the DOM target from

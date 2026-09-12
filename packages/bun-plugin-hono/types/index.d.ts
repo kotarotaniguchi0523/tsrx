@@ -1,5 +1,5 @@
 import type { BunPlugin } from 'bun';
-import type { RuntimeImportMode } from '@tsrx/hono';
+import type { Platform, RuntimeImportMode } from '@tsrx/hono';
 
 export type TsrxHonoMode = 'server' | 'dom';
 
@@ -11,6 +11,8 @@ export interface TsrxHonoBunPluginOptions {
 	 * adapters remain under `@tsrx/hono/*` because Hono has no standalone runtime.
 	 */
 	runtimeImports?: RuntimeImportMode;
+	/** Optional override; inferred from the active Bun build tsconfig by default. */
+	platform?: Platform;
 	emitCss?: boolean;
 }
 

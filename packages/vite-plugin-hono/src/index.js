@@ -1,10 +1,12 @@
 /** @import { Plugin } from 'vite' */
 /** @import { DepScanTransformPlugin } from '@tsrx/core/types/vite/dep-scan' */
-/** @import { RuntimeImportMode } from '@tsrx/hono' */
+/** @import { Platform, RuntimeImportMode } from '@tsrx/hono' */
 
 import { perEnvironmentState, transformWithOxc } from 'vite';
+import { mergePlatformDefinitions, validatePlatform } from '@tsrx/core';
 import { compile as compileServer } from '@tsrx/hono';
 import { compile as compileDom } from '@tsrx/hono/dom';
+import { resolveBuildPlatform } from '@tsrx/core/config';
 import { createDepScanTransformPlugin } from '@tsrx/core/vite/dep-scan';
 
 const TSRX_EXTENSION_PATTERN = /\.tsrx$/;
@@ -17,6 +19,8 @@ const CSS_QUERY = '?tsrx-css&lang.css';
  * @typedef {{
  *   mode?: TsrxHonoMode,
  *   runtimeImports?: RuntimeImportMode,
+ *   platform?: Platform,
+ *   tsconfig?: string,
  * }} TsrxHonoPluginOptions
  */
 
@@ -35,7 +39,22 @@ export function tsrxHono(options = {}) {
 	}
 	const jsx_import_source = mode === 'dom' ? 'hono/jsx/dom' : 'hono/jsx';
 	const compile = mode === 'dom' ? compileDom : compileServer;
-	const compile_options = { runtimeImports: options.runtimeImports };
+	const explicit_platform = validatePlatform(options.platform);
+	let platform = explicit_platform;
+	const compile_options = { runtimeImports: options.runtimeImports, platform };
+
+	/** @param {import('vite').UserConfig} config */
+	function resolve_platform(config) {
+		platform = resolveBuildPlatform({
+			root: config.root ?? process.cwd(),
+			tsconfig:
+				options.tsconfig ??
+				/** @type {{ tsconfig?: string }} */ (/** @type {unknown} */ (config)).tsconfig,
+			platform: explicit_platform,
+			integration: '@tsrx/vite-plugin-hono',
+		});
+		compile_options.platform = platform;
+	}
 
 	// Vite may share this plugin instance across build environments. Keep CSS
 	// owned by the environment that transformed the source so one environment's
@@ -83,19 +102,40 @@ export function tsrxHono(options = {}) {
 		perEnvironmentStartEndDuringDev: true,
 		perEnvironmentWatchChangeDuringDev: true,
 
-		configEnvironment(name, config) {
+		config(config = /** @type {import('vite').UserConfig} */ ({})) {
+			resolve_platform(config);
+			if (platform === undefined) return;
+			return {
+				define: mergePlatformDefinitions(config.define, platform, {
+					integration: 'Vite',
+				}),
+			};
+		},
+
+		configEnvironment(name, config = /** @type {import('vite').EnvironmentOptions} */ ({})) {
 			const discovers_dependencies =
 				name === 'client' || config.optimizeDeps?.noDiscovery === false;
-			if (!discovers_dependencies) return;
+			if (!discovers_dependencies && platform === undefined) return;
 
 			return {
-				optimizeDeps: {
-					extensions: ['.tsrx'],
-					rolldownOptions: {
-						transform: { jsx: { importSource: jsx_import_source } },
-						plugins: [create_dep_scan_plugin(jsx_import_source, compile_options, compile)],
-					},
-				},
+				...(platform === undefined
+					? {}
+					: {
+							define: mergePlatformDefinitions(config.define, platform, {
+								integration: `Vite environment ${JSON.stringify(name)}`,
+							}),
+						}),
+				...(discovers_dependencies
+					? {
+							optimizeDeps: {
+								extensions: ['.tsrx'],
+								rolldownOptions: {
+									transform: { jsx: { importSource: jsx_import_source } },
+									plugins: [create_dep_scan_plugin(jsx_import_source, compile_options, compile)],
+								},
+							},
+						}
+					: {}),
 			};
 		},
 
@@ -164,7 +204,7 @@ export function tsrxHono(options = {}) {
 
 /**
  * @param {string} jsx_import_source
- * @param {{ runtimeImports?: RuntimeImportMode }} compile_options
+ * @param {{ runtimeImports?: RuntimeImportMode, platform?: Platform }} compile_options
  * @param {(code: string, id: string, options?: object) => { code: string }} compile
  * @returns {DepScanTransformPlugin}
  */

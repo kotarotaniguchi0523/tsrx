@@ -51,6 +51,7 @@ function setup_plugin(options, config = {}) {
 		},
 	};
 	plugin.setup(build);
+	hooks.config = build.config;
 	return hooks;
 }
 
@@ -62,6 +63,59 @@ async function load_tsrx(hooks, file_path) {
 describe('@tsrx/bun-plugin-hono', () => {
 	it('rejects an invalid mode instead of silently selecting server', () => {
 		expect(() => tsrxHono({ mode: /** @type {any} */ ('dmo') })).toThrow(/invalid mode/);
+	});
+
+	it('specializes platform flags and defines them for Bun', async () => {
+		install_transpiler_stub();
+		const dir = await mkdtemp(path.join(os.tmpdir(), 'tsrx-bun-plugin-hono-platform-'));
+		try {
+			const file_path = path.join(dir, 'Platform.tsrx');
+			await writeFile(
+				file_path,
+				`if (import.meta.env.platform.web) {
+					const selected_web = 'selected_web';
+				} else {
+					const selected_native = 'selected_native';
+				}`,
+			);
+			const hooks = setup_plugin({ platform: 'web' }, { target: 'browser' });
+			const result = await load_tsrx(hooks, file_path);
+
+			expect(hooks.config.define['import.meta.env.platform.web']).toBe('true');
+			expect(hooks.config.define['import.meta.env.platform.ios']).toBe('false');
+			expect(result.contents).toContain('selected_web');
+			expect(result.contents).not.toContain('selected_native');
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	it('reads the platform from the Bun build tsconfig', async () => {
+		install_transpiler_stub();
+		const dir = await mkdtemp(path.join(os.tmpdir(), 'tsrx-bun-plugin-hono-platform-'));
+		try {
+			await writeFile(
+				path.join(dir, 'tsconfig.json'),
+				JSON.stringify({ tsrx: { platform: 'android' } }),
+			);
+			const file_path = path.join(dir, 'Platform.tsrx');
+			await writeFile(
+				file_path,
+				`if (import.meta.env.platform.android) {
+					const selected_android = 'selected_android';
+				} else {
+					const selected_other = 'selected_other';
+				}`,
+			);
+			const hooks = setup_plugin(undefined, { root: dir, target: 'browser' });
+			const result = await load_tsrx(hooks, file_path);
+
+			expect(hooks.config.define['import.meta.env.platform.android']).toBe('true');
+			expect(result.contents).toContain('selected_android');
+			expect(result.contents).not.toContain('selected_other');
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
 	});
 
 	it('compiles server files and selects hono/jsx', async () => {

@@ -308,6 +308,9 @@ importers:
 
   packages/bun-plugin-hono:
     dependencies:
+      '@tsrx/core':
+        specifier: workspace:*
+        version: link:../tsrx
       '@tsrx/hono':
         specifier: workspace:*
         version: link:../tsrx-hono

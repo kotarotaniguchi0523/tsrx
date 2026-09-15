@@ -59,6 +59,20 @@ runSharedSwitchHelperHoistingTests({
 	clientHelperShape: 'module-function',
 });
 
+describe('removed lazy destructuring', () => {
+	it.each([
+		['server', compileServer],
+		['dom', compileDom],
+	])('%s compiler rejects the removed lazy binding syntax', (_name, compile) => {
+		for (const source of [
+			'function App(&{ name }) { return <div>{name}</div>; }',
+			'function App() { const &[count] = track(0); return <div>{count}</div>; }',
+		]) {
+			expect(() => compile(source, 'App.tsrx')).toThrow(SyntaxError);
+		}
+	});
+});
+
 describe('@tsrx/hono server compiler', () => {
 	it('does not expose the compiler-only Dynamic helper at runtime', () => {
 		expect(honoServerRuntime).not.toHaveProperty('Dynamic');

@@ -24,6 +24,7 @@
     "test:native": "bun test tests/native.test.ts"
   },
   "dependencies": {
+    "@tsrx/core": "workspace:*",
     "@tsrx/hono": "workspace:*"
   },
   "peerDependencies": {

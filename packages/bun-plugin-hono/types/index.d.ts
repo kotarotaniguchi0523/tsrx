@@ -11,8 +11,6 @@ export interface TsrxHonoBunPluginOptions {
 	 * adapters remain under `@tsrx/hono/*` because Hono has no standalone runtime.
 	 */
 	runtimeImports?: RuntimeImportMode;
-	include?: RegExp;
-	exclude?: RegExp | RegExp[];
 	emitCss?: boolean;
 }
 

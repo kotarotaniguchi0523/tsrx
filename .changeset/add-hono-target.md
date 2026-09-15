@@ -6,4 +6,6 @@
 '@tsrx/mcp': patch
 ---
 
-Add Hono JSX server and DOM compiler targets with Vite and Bun integrations.
+Add Hono server and DOM compiler targets with Vite and Bun integrations. DOM
+editor selection is explicit, and DOM async-component validation remains
+conservative and same-module.

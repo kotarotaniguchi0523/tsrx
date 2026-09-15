@@ -99,14 +99,20 @@ The Hono target layer should own:
   \`useRequestContext()\`; streaming uses Hono's \`hono/jsx/streaming\` APIs
 - Hono's \`StreamingContext\`, \`hono/css\`/\`Style\`, custom JSX elements, and
   intrinsic-element type augmentation remain application-level Hono APIs
-- Hono DOM's synchronous component rule: use Hono's \`use(promise)\` with \`<Suspense>\` instead of async components
+- Hono DOM's synchronous component rule: use Hono's \`use(promise)\` with \`<Suspense>\` instead of Promise-returning components. The static validator catches explicit \`async\` components that can be resolved from a same-module component position; it does not infer Promise results across types or modules.
 - Hono ErrorBoundary's \`fallbackRender\` contract, which does not provide a reset callback
 
 Use \`hono/jsx\` for server output and \`hono/jsx/dom\` for browser output. The
 documented Hono pattern may import hooks from \`hono/jsx\` while selecting
 \`hono/jsx/dom\` as the JSX runtime. Do not claim identical server and DOM hook
-or async semantics. Before giving Hono-specific advice, use \`detect-target\` or
-an explicit target signal and validate generated .tsrx code with \`compile-tsrx\`.`,
+or async semantics. Keep server and DOM compilation at the build boundary. For
+Vite, one config can map \`mode === 'client'\` to \`tsrxHono({ mode: 'dom' })\`
+and the default build to \`tsrxHono({ mode: 'server' })\`; run them as separate
+builds (for example, \`vite build --mode client && vite build\`). For Bun, run
+separate \`Bun.build()\` calls with \`mode: 'dom'\` and \`mode: 'server'\`.
+Do not use include/exclude filters to mix the two runtimes within one build.
+Before giving Hono-specific advice, use \`detect-target\` or an explicit target
+signal and validate generated .tsrx code with \`compile-tsrx\`.`,
 	ripple: `# TSRX Ripple Target
 
 The core TSRX MCP server owns target-neutral language syntax and compiler validation. Ripple-specific guidance should live in a Ripple target layer.

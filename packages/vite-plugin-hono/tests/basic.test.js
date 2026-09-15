@@ -5,11 +5,27 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { tsrxHono } from '../src/index.js';
 
+function create_context(module_graph = {}) {
+	return {
+		environment: {
+			moduleGraph: {
+				getModuleById() {
+					return undefined;
+				},
+				invalidateModule() {},
+				...module_graph,
+			},
+		},
+	};
+}
+
 describe('@tsrx/vite-plugin-hono', () => {
 	it('compiles server TSRX through the Hono automatic JSX runtime', async () => {
 		const plugin = tsrxHono();
+		const context = create_context();
 		const id = '/virtual/App.tsrx';
-		const transformed = await plugin.transform(
+		const transformed = await plugin.transform.call(
+			context,
 			`export function App() @{ <div class="app">{'Hello'}</div> }`,
 			id,
 		);
@@ -21,6 +37,7 @@ describe('@tsrx/vite-plugin-hono', () => {
 
 	it('runs transformed server modules with Hono SSR', async () => {
 		const plugin = tsrxHono();
+		const context = create_context();
 		const directory = await mkdtemp(
 			path.join(path.dirname(fileURLToPath(import.meta.url)), '.tmp-hono-'),
 		);
@@ -28,7 +45,8 @@ describe('@tsrx/vite-plugin-hono', () => {
 		try {
 			const source_id = path.join(directory, 'App.tsrx');
 			const output_id = path.join(directory, 'App.js');
-			const transformed = await plugin.transform(
+			const transformed = await plugin.transform.call(
+				context,
 				`export async function App({ items }) @{
 					const title = await Promise.resolve('Hono');
 					<>
@@ -63,6 +81,7 @@ describe('@tsrx/vite-plugin-hono', () => {
 
 	it('works with c.html, c.render, and the JSX renderer context', async () => {
 		const plugin = tsrxHono();
+		const context = create_context();
 		const directory = await mkdtemp(
 			path.join(path.dirname(fileURLToPath(import.meta.url)), '.tmp-hono-renderer-'),
 		);
@@ -70,7 +89,8 @@ describe('@tsrx/vite-plugin-hono', () => {
 		try {
 			const source_id = path.join(directory, 'Page.tsrx');
 			const output_id = path.join(directory, 'Page.js');
-			const transformed = await plugin.transform(
+			const transformed = await plugin.transform.call(
+				context,
 				`import { useRequestContext } from 'hono/jsx-renderer';
 
 				export function SimplePage() @{
@@ -115,6 +135,7 @@ describe('@tsrx/vite-plugin-hono', () => {
 
 	it('preserves Hono StreamingContext around generated Suspense output', async () => {
 		const plugin = tsrxHono();
+		const context = create_context();
 		const directory = await mkdtemp(
 			path.join(path.dirname(fileURLToPath(import.meta.url)), '.tmp-hono-streaming-'),
 		);
@@ -122,7 +143,8 @@ describe('@tsrx/vite-plugin-hono', () => {
 		try {
 			const source_id = path.join(directory, 'StreamingPage.tsrx');
 			const output_id = path.join(directory, 'StreamingPage.js');
-			const transformed = await plugin.transform(
+			const transformed = await plugin.transform.call(
+				context,
 				`import { StreamingContext, Suspense } from 'hono/jsx/streaming';
 
 				async function AsyncContent() {
@@ -155,6 +177,7 @@ describe('@tsrx/vite-plugin-hono', () => {
 
 	it('preserves the StreamingContext nonce in the TSRX ErrorBoundary output', async () => {
 		const plugin = tsrxHono();
+		const context = create_context();
 		const directory = await mkdtemp(
 			path.join(path.dirname(fileURLToPath(import.meta.url)), '.tmp-hono-error-streaming-'),
 		);
@@ -162,7 +185,8 @@ describe('@tsrx/vite-plugin-hono', () => {
 		try {
 			const source_id = path.join(directory, 'ErrorStreamingPage.tsrx');
 			const output_id = path.join(directory, 'ErrorStreamingPage.js');
-			const transformed = await plugin.transform(
+			const transformed = await plugin.transform.call(
+				context,
 				`import { StreamingContext } from 'hono/jsx/streaming';
 
 				async function DelayedContent() {
@@ -199,7 +223,8 @@ describe('@tsrx/vite-plugin-hono', () => {
 
 	it('selects the Hono DOM runtime and forwards direct runtime imports', async () => {
 		const plugin = tsrxHono({ mode: 'dom', runtimeImports: 'direct' });
-		const transformed = await plugin.transform(
+		const transformed = await plugin.transform.call(
+			create_context(),
 			`export function App(props) @{
 				@try {
 					<input {...props} />
@@ -215,8 +240,33 @@ describe('@tsrx/vite-plugin-hono', () => {
 		expect(transformed.code).toContain('@tsrx/hono/dom/error-boundary');
 	});
 
+	it('only transforms .tsrx files for the selected build mode', async () => {
+		const dom = tsrxHono({ mode: 'dom' });
+		const source = 'export function App() @{ <div /> }';
+
+		for (const extension of ['.ts', '.tsx', '.js']) {
+			expect(await dom.transform.call(create_context(), source, `/src/App${extension}`)).toBeNull();
+		}
+		const result = await dom.transform.call(create_context(), source, '/src/App.tsrx');
+		expect(result.code).toContain('hono/jsx/dom/jsx-runtime');
+	});
+
+	it('rejects an invalid mode instead of silently selecting server', () => {
+		expect(() => tsrxHono({ mode: /** @type {any} */ ('dmo') })).toThrow(/invalid mode/);
+	});
+
 	it('emits and refreshes virtual CSS', async () => {
 		const plugin = tsrxHono();
+		const css_module = { id: '\0/virtual/App.tsrx?tsrx-css&lang.css' };
+		const invalidated = [];
+		const context = create_context({
+			getModuleById(module_id) {
+				return module_id === css_module.id ? css_module : undefined;
+			},
+			invalidateModule(module) {
+				invalidated.push(module);
+			},
+		});
 		const id = '/virtual/App.tsrx';
 		const source = `export function App() @{
 			<><div class="app">{'Hello'}</div>
@@ -227,50 +277,32 @@ describe('@tsrx/vite-plugin-hono', () => {
 			<style>.app { color: blue; }</style></>
 		}`;
 
-		const transformed = await plugin.transform(source, id);
+		const transformed = await plugin.transform.call(context, source, id);
 		const virtual_id = `${id}?tsrx-css&lang.css`;
-		const resolved_id = plugin.resolveId(virtual_id);
+		const resolved_id = plugin.resolveId.call(context, virtual_id);
 		expect(transformed.code).toContain(virtual_id);
-		expect(plugin.load(resolved_id)).toContain('color: red;');
+		expect(plugin.load.call(context, resolved_id)).toContain('color: red;');
 
-		const css_module = { id: `\0${virtual_id}` };
-		const invalidated = [];
-		const modules = await plugin.handleHotUpdate({
+		const modules = await plugin.hotUpdate.call(context, {
 			file: id,
 			modules: [{ id }],
 			read: async () => updated_source,
-			server: {
-				moduleGraph: {
-					getModuleById(module_id) {
-						return module_id === css_module.id ? css_module : undefined;
-					},
-					invalidateModule(module) {
-						invalidated.push(module);
-					},
-				},
-			},
 		});
 
-		expect(plugin.load(resolved_id)).toContain('color: blue;');
+		expect(plugin.load.call(context, resolved_id)).toContain('color: blue;');
 		expect(invalidated).toEqual([css_module]);
 		expect(modules).toContain(css_module);
 	});
 
 	it('does not read or compile a file without a loaded virtual CSS module', async () => {
 		const plugin = tsrxHono();
+		const context = create_context();
 		const modules = [{ id: '/virtual/App.tsrx' }];
-		const result = await plugin.handleHotUpdate({
+		const result = await plugin.hotUpdate.call(context, {
 			file: '/virtual/App.tsrx',
 			modules,
 			read: async () => {
 				throw new Error('source should not be read');
-			},
-			server: {
-				moduleGraph: {
-					getModuleById() {
-						return undefined;
-					},
-				},
 			},
 		});
 
@@ -278,9 +310,25 @@ describe('@tsrx/vite-plugin-hono', () => {
 	});
 
 	it('registers Hono JSX runtime dependencies for optimizeDeps', () => {
-		const config = tsrxHono({ mode: 'dom' }).config();
+		const plugin = tsrxHono({ mode: 'dom' });
+		const config = plugin.configEnvironment('client', {});
 		expect(config.optimizeDeps.extensions).toContain('.tsrx');
 		expect(config.optimizeDeps.rolldownOptions.transform.jsx.importSource).toBe('hono/jsx/dom');
 		expect(config.optimizeDeps.rolldownOptions.plugins).toHaveLength(1);
+		expect(plugin.configEnvironment('ssr', {})).toBeUndefined();
+	});
+
+	it('uses the core dep-scan filter without path-specific exclusions', async () => {
+		const plugin = tsrxHono({ mode: 'dom' });
+		const scan_plugin = plugin.configEnvironment('client', {}).optimizeDeps.rolldownOptions
+			.plugins[0];
+		const filter = scan_plugin.transform.filter.id;
+
+		expect(filter).toEqual(/\.tsrx$/);
+		const result = await scan_plugin.transform.handler(
+			'export function App() @{ <div /> }',
+			'/src/other/App.tsrx',
+		);
+		expect(result?.code).toContain('hono/jsx/dom');
 	});
 });

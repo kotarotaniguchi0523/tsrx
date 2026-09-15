@@ -8,6 +8,7 @@ import fs from 'fs';
 const {
 	is_tsrx_file,
 	find_workspace_compiler_entry_for_file,
+	get_compiler_entry_for_file,
 	get_tsrx_compiler_name_for_file,
 	is_ripple_target_file,
 	COMPILER_CANDIDATES,
@@ -164,6 +165,15 @@ describe('typescript-plugin compiler resolution', () => {
 			expect(find_workspace_compiler_entry_for_file(file_name, fs.existsSync, new Map())).toBe(
 				expected,
 			);
+		});
+
+		it('resolves an explicitly selected Hono DOM compiler subpath', () => {
+			const workspace = create_fixture_workspace('hono-dom-explicit');
+			const file_name = path.join(workspace, 'src', 'App.tsrx');
+			const expected = path.join(workspace, 'node_modules', '@tsrx', 'hono', 'dom.js');
+
+			expect(get_compiler_entry_for_file(file_name)).toBe(expected);
+			expect(get_tsrx_compiler_name_for_file(file_name)).toBe('@tsrx/hono');
 		});
 
 		it('selects the octane compiler (published dist entry path) in an octane-only project', () => {

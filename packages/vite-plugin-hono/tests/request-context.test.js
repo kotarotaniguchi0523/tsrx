@@ -12,6 +12,10 @@ function deferred() {
 	return { promise, resolve };
 }
 
+function create_plugin_context() {
+	return { environment: {} };
+}
+
 describe('Hono request context integration', () => {
 	it('isolates useRequestContext across concurrent TSRX renders', async () => {
 		const plugin = tsrxHono();
@@ -22,7 +26,8 @@ describe('Hono request context integration', () => {
 		try {
 			const source_id = path.join(directory, 'RequestPage.tsrx');
 			const output_id = path.join(directory, 'RequestPage.js');
-			const transformed = await plugin.transform(
+			const transformed = await plugin.transform.call(
+				create_plugin_context(),
 				`import { useRequestContext } from 'hono/jsx-renderer';
 
 				export async function RequestPage({ wait, entered }) @{
@@ -86,7 +91,8 @@ describe('Hono request context integration', () => {
 		try {
 			const source_id = path.join(directory, 'StreamingRequestPage.tsrx');
 			const output_id = path.join(directory, 'StreamingRequestPage.js');
-			const transformed = await plugin.transform(
+			const transformed = await plugin.transform.call(
+				create_plugin_context(),
 				`import { useRequestContext } from 'hono/jsx-renderer';
 				import { Suspense } from 'hono/jsx/streaming';
 

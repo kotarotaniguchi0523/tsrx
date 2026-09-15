@@ -152,6 +152,8 @@ describe('@tsrx/mcp stdio server', () => {
 
 			const hono_target = await client.readResource({ uri: 'tsrx://targets/hono.md' });
 			expect(expect_text_content(hono_target.contents[0])).toContain('Hono target layer');
+			expect(expect_text_content(hono_target.contents[0])).toContain('vite build --mode client');
+			expect(expect_text_content(hono_target.contents[0])).toContain('Bun.build()');
 		});
 	});
 

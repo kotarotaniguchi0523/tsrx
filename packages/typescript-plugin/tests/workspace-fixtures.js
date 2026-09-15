@@ -117,6 +117,7 @@ const COMPILER_STUBS = {
 	react: compiler_stub('react'),
 	solid: compiler_stub('solid'),
 	preact: compiler_stub('preact'),
+	hono: compiler_stub('hono'),
 	// Octane ships its compiler inside the `octane` package under
 	// `<layout>/compiler/volar.js` and exports the contract under a camelCase name
 	// — this stub mirrors the real published shape so the tests cover the
@@ -248,6 +249,17 @@ export const WORKSPACE_CONFIGS = {
 			},
 		},
 		compilers: ['vue'],
+	},
+	'hono-only': {
+		package_json: {
+			name: '@tsrx/fixture-hono-only-project',
+			private: true,
+			devDependencies: {
+				'@tsrx/hono': 'workspace:*',
+				'@tsrx/vite-plugin-hono': 'workspace:*',
+			},
+		},
+		compilers: ['hono'],
 	},
 	'octane-only': {
 		package_json: {

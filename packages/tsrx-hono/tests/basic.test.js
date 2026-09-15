@@ -150,6 +150,37 @@ describe('@tsrx/hono server compiler', () => {
 });
 
 describe('@tsrx/hono DOM compiler', () => {
+	it('specializes compile-time platform flags before DOM lowering', () => {
+		const { code } = compileDom(
+			`if (import.meta.env.platform.web) {
+				const selected_web = 'selected_web';
+			} else {
+				const selected_native = 'selected_native';
+			}`,
+			'Platform.tsrx',
+			{ platform: 'web' },
+		);
+
+		expect(code).toContain('selected_web');
+		expect(code).not.toContain('selected_native');
+		expect(code).not.toContain('import.meta.env.platform');
+	});
+
+	it('provides platform flag types in DOM editor output', () => {
+		const result = compileDomToVolarMappings(
+			`export const web: true = import.meta.env.platform.web;
+			export const ios: false = import.meta.env.platform.ios;
+			export const android: false = import.meta.env.platform.android;`,
+			'Platform.tsrx',
+			{ platform: 'web' },
+		);
+
+		expect(result.errors).toEqual([]);
+		expect(result.code).toContain('readonly web: true');
+		expect(result.code).toContain('readonly ios: false');
+		expect(result.code).toContain('readonly android: false');
+	});
+
 	it.each([
 		'const UI = { App: async () => <div /> }; const view = <UI.App />;',
 		'const UI = { nested: { App: async () => <div /> } }; const view = <UI.nested.App />;',

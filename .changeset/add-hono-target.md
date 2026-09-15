@@ -6,6 +6,7 @@
 '@tsrx/mcp': patch
 ---
 
-Add Hono server and DOM compiler targets with Vite and Bun integrations. DOM
-editor selection is explicit, and DOM async-component validation remains
+Add Hono server and DOM compiler targets with Vite and Bun integrations. The
+compilers and build integrations support the shared compile-time platform flags;
+DOM editor selection remains explicit, and DOM async-component validation stays
 conservative and same-module.

@@ -68,7 +68,12 @@ import tsrxHono from '@tsrx/bun-plugin-hono';
 Bun.plugin(tsrxHono());
 ```
 
-Options are `mode`, `runtimeImports`, and `emitCss`.
+Options are `mode`, `runtimeImports`, `platform`, and `emitCss`.
+
+The plugin reads `tsrx.platform` (`web`, `ios`, or `android`) from the active
+build tsconfig and specializes `import.meta.env.platform.*` at compile time.
+`platform` is an optional explicit override and is independent of the Hono
+`server`/`dom` mode.
 
 `runtimeImports: 'direct'` is a limited helper-import mode for Hono: shared
 helpers use `@tsrx/core/runtime/*`, while Hono-specific adapters still use

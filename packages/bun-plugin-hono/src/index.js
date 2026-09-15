@@ -1,9 +1,11 @@
 /** @import { BunPlugin, Target, Transpiler } from 'bun' */
-/** @import { RuntimeImportMode } from '@tsrx/hono' */
+/** @import { Platform, RuntimeImportMode } from '@tsrx/hono' */
 
 import { readFile } from 'node:fs/promises';
+import { mergePlatformDefinitions, validatePlatform } from '@tsrx/core';
 import { compile as compileServer } from '@tsrx/hono';
 import { compile as compileDom } from '@tsrx/hono/dom';
+import { resolveBuildPlatform } from '@tsrx/core/config';
 
 const TSRX_EXTENSION_PATTERN = /\.tsrx$/;
 const CSS_QUERY = '?tsrx-css&lang.css';
@@ -18,6 +20,7 @@ const CSS_NAMESPACE = '@tsrx/bun-plugin-hono-css';
  *   mode?: TsrxHonoMode,
  *   emitCss?: boolean,
  *   runtimeImports?: RuntimeImportMode,
+ *   platform?: Platform,
  * }} TsrxHonoBunPluginOptions
  */
 
@@ -60,7 +63,7 @@ export function tsrxHono(options = {}) {
 	const jsx_import_source = mode === 'dom' ? 'hono/jsx/dom' : 'hono/jsx';
 	const compile = mode === 'dom' ? compileDom : compileServer;
 	const emit_css = options.emitCss ?? true;
-	const compile_options = { runtimeImports: options.runtimeImports };
+	const explicit_platform = validatePlatform(options.platform);
 
 	/** @type {Map<string, string>} */
 	const css_cache = new Map();
@@ -80,6 +83,21 @@ export function tsrxHono(options = {}) {
 
 		setup(build) {
 			const build_config = build.config ?? {};
+			const platform = resolveBuildPlatform({
+				root: build_config.root ?? process.cwd(),
+				tsconfig: typeof build_config.tsconfig === 'string' ? build_config.tsconfig : undefined,
+				platform: explicit_platform,
+				integration: '@tsrx/bun-plugin-hono',
+			});
+			const compile_options = { runtimeImports: options.runtimeImports, platform };
+			if (platform !== undefined && build.config) {
+				build.config.define = /** @type {Record<string, string>} */ (
+					mergePlatformDefinitions(build.config.define, platform, {
+						integration: 'Bun',
+						serialize: true,
+					})
+				);
+			}
 			const transpiler = create_transpiler(jsx_import_source, build_config.target);
 
 			build.onResolve({ filter: CSS_QUERY_PATTERN }, (args) => {

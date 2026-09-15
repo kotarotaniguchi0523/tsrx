@@ -255,6 +255,58 @@ describe('@tsrx/vite-plugin-hono', () => {
 		expect(() => tsrxHono({ mode: /** @type {any} */ ('dmo') })).toThrow(/invalid mode/);
 	});
 
+	it('specializes platform flags and defines them for Vite', async () => {
+		const plugin = tsrxHono({ platform: 'web' });
+		const config = plugin.config({});
+		const environment_config = plugin.configEnvironment('client', {});
+		const source = `if (import.meta.env.platform.web) {
+			const selected_web = 'selected_web';
+		} else {
+			const selected_native = 'selected_native';
+		}`;
+		const transformed = await plugin.transform.call(
+			create_context(),
+			source,
+			'/virtual/Platform.tsrx',
+		);
+
+		expect(config.define['import.meta.env.platform.web']).toBe(true);
+		expect(config.define['import.meta.env.platform.ios']).toBe(false);
+		expect(environment_config.define['import.meta.env.platform.web']).toBe(true);
+		expect(transformed.code).toContain('selected_web');
+		expect(transformed.code).not.toContain('selected_native');
+	});
+
+	it('reads the platform from the Vite project tsconfig', async () => {
+		const directory = await mkdtemp(
+			path.join(path.dirname(fileURLToPath(import.meta.url)), '.tmp-hono-platform-'),
+		);
+
+		try {
+			await writeFile(
+				path.join(directory, 'tsconfig.json'),
+				JSON.stringify({ tsrx: { platform: 'ios' } }),
+			);
+			const plugin = tsrxHono();
+			const config = plugin.config({ root: directory });
+			const transformed = await plugin.transform.call(
+				create_context(),
+				`if (import.meta.env.platform.ios) {
+					const selected_ios = 'selected_ios';
+				} else {
+					const selected_other = 'selected_other';
+				}`,
+				path.join(directory, 'Platform.tsrx'),
+			);
+
+			expect(config.define['import.meta.env.platform.ios']).toBe(true);
+			expect(transformed.code).toContain('selected_ios');
+			expect(transformed.code).not.toContain('selected_other');
+		} finally {
+			await rm(directory, { recursive: true, force: true });
+		}
+	});
+
 	it('emits and refreshes virtual CSS', async () => {
 		const plugin = tsrxHono();
 		const css_module = { id: '\0/virtual/App.tsrx?tsrx-css&lang.css' };

@@ -246,18 +246,26 @@ function find_hono_dom_async_component(ast, analysis, is_custom_diagnostic_candi
 		}
 
 		if (node.type === 'ObjectExpression' && property_path.length) {
-			for (const property of node.properties) {
-				if (property.type !== 'Property' || property.kind !== 'init') continue;
+			// Later properties replace earlier ones. A spread or dynamic key can
+			// replace any earlier member, so stop unless a later static definition
+			// has already established the effective value.
+			for (let index = node.properties.length - 1; index >= 0; index--) {
+				const property = node.properties[index];
+				if (property.type !== 'Property') return null;
 				if (
 					property.computed &&
 					(property.key.type !== 'Literal' || typeof property.key.value !== 'string')
 				) {
-					continue;
+					return null;
 				}
 				if (get_hono_static_name(property.key, true) !== property_path[0]) continue;
-				const found = resolve_async_component(property.value, property_path.slice(1), next_seen);
-				if (found) return found;
+				// Accessors also replace data properties, but resolving their return
+				// values would require execution rather than static reference lookup.
+				return property.kind === 'init'
+					? resolve_async_component(property.value, property_path.slice(1), next_seen)
+					: null;
 			}
+			return null;
 		}
 
 		const reference = resolve_hono_reference(node, scopes.get(node) ?? analysis.scope);

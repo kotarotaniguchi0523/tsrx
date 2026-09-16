@@ -3,28 +3,17 @@ import { bindNode, bindValue, effect, track } from 'ripple';
 
 import { DEFAULT_DEMO_SOURCE } from '../lib/demo.ts';
 import { DEMO_SNIPPETS } from '../lib/demo-snippets.ts';
+import { DEMO_TARGET_OPTIONS } from '../lib/demo-targets.ts';
 
 const MAX_SOURCE_LENGTH = 12000;
 const DEBOUNCE_MS = 280;
 const HASH_DEBOUNCE_MS = 400;
 const CUSTOM_SNIPPET_VALUE = '__custom';
 const EMPTY_DEMO_SOURCE = '';
-const TARGET_OPTIONS = [
-	{ value: 'octane', label: 'Octane' },
-	{ value: 'react', label: 'React' },
-	{ value: 'preact', label: 'Preact' },
-	{ value: 'ripple', label: 'Ripple' },
-	{ value: 'solid', label: 'Solid' },
-	{ value: 'vue', label: 'Vue' },
-];
-const TARGET_LABELS: Record<string, string> = {
-	octane: 'Octane output',
-	react: 'React output',
-	preact: 'Preact output',
-	vue: 'Vue output',
-	ripple: 'Ripple output',
-	solid: 'Solid output',
-};
+const TARGET_OPTIONS = DEMO_TARGET_OPTIONS;
+const TARGET_LABELS: Record<string, string> = Object.fromEntries(
+	TARGET_OPTIONS.map((target) => [target.value, target.outputLabel]),
+);
 
 const VALID_TARGETS = new Set(TARGET_OPTIONS.map((o) => o.value));
 const SNIPPET_BY_VALUE = new Map(DEMO_SNIPPETS.map((snippet) => [snippet.value, snippet]));

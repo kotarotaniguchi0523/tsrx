@@ -120,6 +120,13 @@ export default defineConfig({
 		projects: [
 			{
 				test: {
+					name: 'website',
+					include: ['website-tsrx/tests/**/*.test.ts'],
+					environment: 'node',
+				},
+			},
+			{
+				test: {
 					name: 'tsrx-hono',
 					include: ['packages/tsrx-hono/tests/**/*.test.js'],
 					environment: 'node',

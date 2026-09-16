@@ -1347,6 +1347,9 @@ importers:
       '@ripple-ts/adapter-node':
         specifier: catalog:default
         version: 0.4.0
+      '@tsrx/hono':
+        specifier: workspace:*
+        version: link:../packages/tsrx-hono
       '@tsrx/preact':
         specifier: workspace:*
         version: link:../packages/tsrx-preact

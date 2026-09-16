@@ -170,7 +170,9 @@ describe('typescript-plugin compiler resolution', () => {
 		it('resolves an explicitly selected Hono DOM compiler subpath', () => {
 			const workspace = create_fixture_workspace('hono-dom-explicit');
 			const file_name = path.join(workspace, 'src', 'App.tsrx');
-			const expected = path.join(workspace, 'node_modules', '@tsrx', 'hono', 'dom.js');
+			const expected = fs.realpathSync(
+				path.join(workspace, 'node_modules', '@tsrx', 'hono', 'dom.js'),
+			);
 
 			expect(get_compiler_entry_for_file(file_name)).toBe(expected);
 			expect(get_tsrx_compiler_name_for_file(file_name)).toBe('@tsrx/hono');

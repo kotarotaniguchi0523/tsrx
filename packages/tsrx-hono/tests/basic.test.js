@@ -202,6 +202,25 @@ describe('@tsrx/hono DOM compiler', () => {
 		expect(() => compileDom(source, 'App.tsrx')).toThrow(/does not support async components/);
 		expect(() => compileServer(source, 'App.tsrx')).not.toThrow();
 	});
+	it.each([
+		'const UI = { App: async () => <div />, App: () => <span /> }; <UI.App />;',
+		'const UI = { App: async () => <div />, ...overrides }; <UI.App />;',
+		'const UI = { App: async () => <div />, [key]: () => <span /> }; <UI.App />;',
+		'const UI = { App: async () => <div />, get App() { return () => <span />; } }; <UI.App />;',
+		'const UI = { nested: { App: async () => <div />, App: () => <span /> } }; <UI.nested.App />;',
+	])('does not diagnose an overwritten or uncertain object member: %s', (source) => {
+		expect(() => compileDom(source, 'App.tsrx')).not.toThrow();
+		expect(compileDomToVolarMappings(source, 'App.tsrx').errors).toEqual([]);
+	});
+
+	it.each([
+		'const UI = { App: () => <span />, App: async () => <div /> }; <UI.App />;',
+		'const UI = { ...overrides, App: async () => <div /> }; <UI.App />;',
+		'const UI = { [key]: () => <span />, App: async () => <div /> }; <UI.App />;',
+	])('diagnoses a final known async object member: %s', (source) => {
+		expect(() => compileDom(source, 'App.tsrx')).toThrow(/does not support async components/);
+	});
+
 	it('rejects an async component referenced by a dynamic tag', () => {
 		expect(() =>
 			compileDom('const App = async () => <div />; const view = <{App} />;', 'App.tsrx'),
